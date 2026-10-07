@@ -1,3 +1,4 @@
+import { suggestRange, rangeFits } from "./range.js";
 import {
   VERSION,
   initialState,
@@ -425,8 +426,30 @@ function confirmRangePlacement() {
   const f = FACILITIES.find((f) => f.id === "range");
   sheet(
     "Build driving range",
-    `<p>${Math.round(dist(rangeDraft.tee, rangeDraft.target))} yd practice area · ${money(f.cost)} construction · ${money(f.upkeep)} daily care.</p><p>Visitors sometimes hit three practice shots here before their round. Keep its flight corridor away from holes.</p><div class="row"><button id="confirmRange" class="primary">Build range</button><button id="cancelRange">Cancel</button></div>`,
+    `<p>${Math.round(dist(rangeDraft.tee, rangeDraft.target))} yd practice area · ${money(f.cost)} construction · ${money(f.upkeep)} daily care.</p><svg viewBox="0 0 240 90" aria-label="Practice area direction" style="width:100%;height:90px"><path d="M30 45h160" stroke="#89b889" stroke-width="24" stroke-linecap="round"/><g transform="translate(120 45) rotate(${(Math.atan2(rangeDraft.target.y - rangeDraft.tee.y, rangeDraft.target.x - rangeDraft.tee.x) * 180) / Math.PI})"><path d="M-60 0h120m-16-12 16 12-16 12" stroke="#f2ce78" stroke-width="3" fill="none"/></g></svg><p>The arrow shows its direction on your land. Rotate it or choose your own target. Visitors sometimes hit three real practice shots before their round.</p><div class="row"><button id="rangeLeft">Rotate left</button><button id="rangeRight">Rotate right</button><button id="rangeAim">Choose target myself</button></div><div class="row"><button id="confirmRange" class="primary">Build range</button><button id="cancelRange">Cancel</button></div>`,
   );
+  for (const [id, delta] of [
+    ["rangeLeft", -Math.PI / 4],
+    ["rangeRight", Math.PI / 4],
+  ])
+    $(id).onclick = () => {
+      const angle = Math.atan2(
+        rangeDraft.target.y - rangeDraft.tee.y,
+        rangeDraft.target.x - rangeDraft.tee.x,
+      );
+      const rotated = suggestRange(s, rangeDraft.tee, angle + delta);
+      if (!rotated) return toast("This location has no other safe direction.");
+      rangeDraft = rotated;
+      renderer.rangeDraft = rangeDraft;
+      confirmRangePlacement();
+    };
+  $("rangeAim").onclick = () => {
+    delete rangeDraft.target;
+    tool = "rangeTarget";
+    closeSheet();
+    updateUI();
+    toast("Tap a target on your land, at least 80 yards away.");
+  };
   $("confirmRange").onclick = () => {
     if (s.cash < f.cost) return toast("Not enough money.");
     s.cash -= f.cost;
@@ -459,19 +482,31 @@ function paint(p) {
   if (rangeDraft) {
     if (lastPoint) return;
     lastPoint = p;
-    if (tool === "rangeTee") {
+    if (tool === "rangeTee" || tool === "rangeAuto") {
       if (!ownedAt(s, { x: p.x + 12, y: p.y })) {
         lastPoint = null;
         return toast("Leave room for three practice bays on your land.");
+      }
+      if (tool === "rangeAuto") {
+        const suggested = suggestRange(s, p);
+        if (!suggested) {
+          lastPoint = null;
+          return toast(
+            "Tap farther inside your land to leave room for the practice area.",
+          );
+        }
+        rangeDraft = suggested;
+        renderer.rangeDraft = rangeDraft;
+        return;
       }
       rangeDraft.tee = { ...p };
       renderer.rangeDraft = rangeDraft;
       tool = "rangeTarget";
       toast("Now tap the range target, at least 80 yards away.");
     } else {
-      if (dist(rangeDraft.tee, p) < 80) {
+      if (!rangeFits(s, rangeDraft.tee, p)) {
         lastPoint = null;
-        toast("Choose a target at least 80 yards away.");
+        toast("Keep an 80+ yard practice corridor inside your land.");
         return;
       }
       rangeDraft.target = { ...p };
@@ -560,6 +595,7 @@ function openHole() {
     return;
   }
   h.open = true;
+  s.tutorialComplete = true;
   addJournal(
     s,
     "Hole opened",
@@ -600,10 +636,11 @@ function objective() {
     return (
       "<b>Place your driving range</b><br>" +
       (!rangeDraft.tee
-        ? "Tap a tee location."
+        ? "Tap where golfers will stand. We’ll suggest the direction and length."
         : "Tap a target at least 80 yd away.") +
       " Select any construction tool to cancel."
     );
+  if (s.tutorialComplete) return "";
   let h = s.holes[holeIndex];
   if (mode === "build") {
     if (!h.tee)
@@ -1365,9 +1402,11 @@ function clubFacilities(el) {
           closeSheet();
           setMode("build");
           rangeDraft = {};
-          tool = "rangeTee";
+          tool = "rangeAuto";
+          renderer.frame();
+          updateUI();
           toast(
-            "Range: tap a tee location, then a target at least 80 yards away. Cost " +
+            "Tap where golfers stand. We’ll suggest a practice area. Cost " +
               money(f.cost) +
               " on confirmation.",
           );
@@ -1435,7 +1474,7 @@ function clubRecords(el) {
     ]
       .map(([key, label]) => {
         let r = s.records[key];
-        return `<div class="item"><div><b>${label}</b><p>${r ? `${r.score} (${relative(r.relative)}) · ${esc(r.name)}` : "No completed round yet"}</p><small>${r ? `${r.holes} holes · Day ${r.day}` : ""}</small></div></div>`;
+        return `<div class="item"><div><b>${label}</b><p>${r ? `${r.score} (${relative(r.relative)}) · ${esc(r.name)}` : "No completed round yet"}</p><small>${r ? `${r.holes} holes · ${TEE_NAMES[r.teeSet || "standard"]} tees · Day ${r.day}` : ""}</small></div></div>`;
       })
       .join("") +
     "<h3>Hole history</h3>" +
@@ -1452,7 +1491,7 @@ function clubRecords(el) {
         .slice(0, 12)
         .map(
           (r) =>
-            `<div class="item"><div><b>${r.score} (${relative(r.relative)}) · ${esc(r.name)}</b><small>${r.holes}-hole record · Day ${r.day}${r.player ? " · Course owner" : ""}</small></div></div>`,
+            `<div class="item"><div><b>${r.score} (${relative(r.relative)}) · ${esc(r.name)}</b><small>${r.holes}-hole record · ${TEE_NAMES[r.teeSet || "standard"]} tees · Day ${r.day}${r.player ? " · Course owner" : ""}</small></div></div>`,
         )
         .join("") || "<p>No records have been set yet.</p>"
     }`,

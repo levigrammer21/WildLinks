@@ -1,3 +1,10 @@
+# Wild Links 1.2.1
+
+- Fix tree recovery: low punch shots use procedural trunk/canopy collision and search sideways/backward safe exits. Owners and AI share the new recovery club and physics.
+- Fix repeated course-record announcements: compare each routing/actual tee configuration against its own historical best, normalize fallback tees, preserve ties, and exclude picked-up/incomplete rounds. Reconcile existing record books on load.
+- Permanently dismiss the tutorial overlay when the first hole opens, including existing saves.
+- Simplify driving-range placement to one tap plus review/confirmation, with rotation, optional manual targeting and owned-corridor validation.
+
 # Wild Links 1.2.0
 
 - Email/password accounts with confirmed registration, password recovery, private Firestore course collections, offline local saves, visible sync status and stale-device conflict choices.

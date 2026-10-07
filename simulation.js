@@ -1,3 +1,4 @@
+import { normalizeRecord, shouldReplaceSummary } from "./records.js";
 import { playedHole, chooseTees, teeFor, addJournal } from "./design.js";
 import {
   clamp,
@@ -700,7 +701,7 @@ export class Simulation {
       total = v.scores.reduce((a, h) => a + h.score, 0),
       par = v.scores.reduce((a, h) => a + h.par, 0),
       rel = total - par,
-      rec = {
+      rec = normalizeRecord(s, {
         name: v.golfer.name,
         score: total,
         relative: rel,
@@ -712,15 +713,14 @@ export class Simulation {
         teeSet: v.teeSet || "standard",
         player: v.player,
         memberId: v.memberId || "owner",
-        pickup: v.scores.some((h) => h.pickup),
-      };
+        pickup:
+          v.scores.some((h) => h.pickup) || v.scores.length !== v.holes.length,
+      });
     let key =
       rec.holes === 18 ? "eighteen" : rec.holes === 9 ? "nine" : "overall";
-    if (
-      !s.records[key] ||
-      s.records[key].layout !== rec.layout ||
-      rel < s.records[key].relative
-    ) {
+    s.recordBook ||= {};
+    const previousRecord = s.recordBook[rec.layout];
+    if (!rec.pickup && (!previousRecord || rel < previousRecord.relative)) {
       s.recordHistory ||= [];
       s.recordHistory.unshift({ ...rec, category: key });
       addJournal(
@@ -739,38 +739,40 @@ export class Simulation {
         { memberId: rec.memberId },
       );
       s.recordHistory = s.recordHistory.slice(0, 100);
-      s.records[key] = rec;
+      if (shouldReplaceSummary(s.records[key], rec)) s.records[key] = rec;
       this.notify(
-        `New ${rec.holes}-hole course record: ${rec.name}, ${total} (${relative(rel)}).`,
+        `New ${rec.holes}-hole ${rec.teeSet} tee record: ${rec.name}, ${total} (${relative(rel)}).`,
       );
     }
     s.recordBook ||= {};
     const bk = rec.layout;
-    if (!s.recordBook[bk] || rec.relative < s.recordBook[bk].relative)
+    if (
+      !rec.pickup &&
+      (!s.recordBook[bk] || rec.relative < s.recordBook[bk].relative)
+    )
       s.recordBook[bk] = { ...rec };
     let personal = v.player ? "personal" : "ai";
-    if (
-      !s.records[personal] ||
-      s.records[personal].layout !== rec.layout ||
-      rel < s.records[personal].relative
-    )
+    const personalBook = v.player
+      ? (s.personalRecordBook ||= {})
+      : (s.visitorRecordBook ||= {});
+    if (!rec.pickup && (!personalBook[bk] || rel < personalBook[bk].relative))
+      personalBook[bk] = rec;
+    if (!rec.pickup && shouldReplaceSummary(s.records[personal], rec))
       s.records[personal] = rec;
     if (v.player) {
       s.player.stats.rounds++;
       s.ownerRounds.unshift({ ...rec });
       s.ownerRounds = s.ownerRounds.slice(0, 100);
-      if (
-        !s.player.stats.best ||
-        s.player.stats.best.layout !== rec.layout ||
-        rel < s.player.stats.best.relative
-      )
+      if (!rec.pickup && shouldReplaceSummary(s.player.stats.best, rec))
         s.player.stats.best = rec;
       if (
+        !rec.pickup &&
         rec.holes === 9 &&
         (!s.player.stats.bestNine || rel < s.player.stats.bestNine.relative)
       )
         s.player.stats.bestNine = rec;
       if (
+        !rec.pickup &&
         rec.holes === 18 &&
         (!s.player.stats.bestEighteen ||
           rel < s.player.stats.bestEighteen.relative)

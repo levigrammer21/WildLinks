@@ -1,3 +1,10 @@
+## Fixes in 1.2.1
+
+- Low punch recoveries escape trees through trunk-aware shared physics; golfers search sideways and backward exits. The owner has the same Punch shot club.
+- Records compare matching routing and actual tees. Missing alternate tees share the Standard comparison; ties, worse scores and pickups cannot replace a record. Existing record books/history are reconciled on load.
+- The tutorial overlay permanently clears after opening the first hole. Contextual placement instructions remain for optional construction tools.
+- One-tap driving-range suggestions with rotate controls, optional manual target and owned-land corridor validation.
+
 ## New in 1.2
 
 - Email/password accounts with confirmed registration, password recovery, private Firestore course collections, offline local saves, visible sync status and stale-device conflict choices.
@@ -12,7 +19,7 @@
 
 Read **FIREBASE_SETUP.md** and publish **firestore.rules** before using private cloud saves. Firebase console settings require the project owner; the ZIP includes everything needed on the game side.
 
-# Wild Links — v1.2.0
+# Wild Links — v1.2.1
 
 A mobile-first golf course sandbox and tycoon game. Start with an undeveloped property, $5,000, a check-in hut, and capacity for three holes. Paint your own golf architecture, open it to paying visitors, watch their shots, and play the same course yourself.
 
@@ -59,7 +66,7 @@ The estate has four plots in a 2×2 layout; you own the northwest to start. Nort
 
 Every visitor is remembered, including their abilities, preferences, visits, satisfaction and scoring on each hole. Happy golfers return, and higher reputation brings stronger demand. Clubhouse → Regulars reveals who your architecture suits. The map’s trail button overlays actual recent shots, filtered by ability or the owner. Name holes from Routing → Details.
 
-Build a driving range from Facilities: tap its tee, then its target, and confirm the quoted cost. Visitors sometimes hit three real practice shots before their tee time, paying $3 for practice or $7 with coaching. Three practice bays prevent crowding.
+Build a driving range from Facilities: tap where golfers stand and review the suggested direction and length. Rotate if desired, or choose your own target, then confirm the quoted cost. Visitors sometimes hit three real practice shots before their tee time, paying $3 for practice or $7 with coaching. Three practice bays prevent crowding.
 
 Tournaments require at least 6, 9 or 18 open holes, cost $350 / $600 / $1,200 to host, and run for two operating days. Choose an ability audience, watch the live leaderboard, and earn $22 for each completed competitive round. Each golfer’s best round counts. Event hole designs and pars are locked until the event ends; owner rounds with the same routing and tee set also qualify. Winners remain in tournament history.
 

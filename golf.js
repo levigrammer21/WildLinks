@@ -130,6 +130,7 @@ export function clubs(g) {
     { name: "Wedge", range: g.drive * 0.34, loft: 2.1, kind: "wedge" },
     { name: "Sand wedge", range: g.drive * 0.25, loft: 2.5, kind: "bunker" },
     { name: "Putter", range: 38, loft: 0, kind: "putt" },
+    { name: "Punch shot", range: g.drive * 0.4, loft: 0.12, kind: "recovery" },
   ];
 }
 export function suggestClub(s, g, p, pin) {
@@ -138,7 +139,8 @@ export function suggestClub(s, g, p, pin) {
     cs = clubs(g);
   if (t === 2 || d < 4) return cs[7];
   if (t === 3) return cs[6];
-  if (t === 7 || t === 5) return d > 80 ? cs[4] : cs[5];
+  if (t === 7) return cs[8];
+  if (t === 5) return d > 80 ? cs[4] : cs[5];
   return (
     cs
       .slice(0, 6)
@@ -157,9 +159,12 @@ export function shotProfile(s, g, p, c, power) {
             ? g.putting
             : c.kind === "bunker"
               ? g.bunker
-              : g.wedge,
+              : c.kind === "recovery"
+                ? g.recovery
+                : g.wedge,
     lie = t === 0 ? 0.87 : t === 5 ? 0.62 : t === 3 ? 0.72 : t === 7 ? 0.6 : 1;
   if (c.kind === "bunker" && t === 3) lie = 0.96;
+  if (c.kind === "recovery" && t === 7) lie = 0.85;
   if (c.kind === "putt" && t !== 2) lie = 0.48;
   const range = c.range * clamp(power, 0.025, 1.15) * lie,
     condition =
@@ -249,7 +254,7 @@ export function executeShot(s, g, p, pin, c, power, angle) {
           Math.sin(t * Math.PI) * c.loft * forward * 0.13 +
           elev -
           heightAt(s, q);
-      if (terrainAt(s, q) === 7 && z < 13 && t > 0.02) {
+      if (treeCollision(s, q, z, p)) {
         land = q;
         treeHit = true;
         quality = "Clipped a tree";
@@ -390,10 +395,110 @@ function segmentDistance(p, a, b) {
     t = v ? clamp(((p.x - a.x) * x + (p.y - a.y) * y) / v, 0, 1) : 0;
   return Math.hypot(a.x + t * x - p.x, a.y + t * y - p.y);
 }
+// Use the same twelve-yard tree centers as the renderer. Canopies are not solid walls.
+export function treeCollision(s, q, z, origin) {
+  for (let y = Math.floor(q.y / 12) * 12 - 12; y <= q.y + 12; y += 12)
+    for (let x = Math.floor(q.x / 12) * 12 - 12; x <= q.x + 12; x += 12) {
+      if (terrainAt(s, { x, y }) !== T.TREE) continue;
+      const hash = ((x * 17 + y * 29) % 97) / 97,
+        center = { x: x + hash * 6, y: y + hash * 3 };
+      if (dist(q, origin) < 3) continue;
+      if (z < 13 && dist(q, center) < (z < 3 ? 0.85 : 8 + hash * 2))
+        return true;
+    }
+  return false;
+}
+export function recoveryShot(s, g, p, h) {
+  const club = clubs(g)[8],
+    max = shotProfile(s, g, p, club, 1).range;
+  let best = null,
+    bestScore = Infinity;
+  const safe = [];
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 16)
+    for (let d = 12; d <= 180; d += 12) {
+      const q = { x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d };
+      if (![T.TREE, T.WATER, -1].includes(terrainAt(s, q))) {
+        safe.push(q);
+        break;
+      }
+    }
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 32)
+    for (const d of [12, 24, 40, 60, max]) {
+      if (d > max) continue;
+      const q = { x: p.x + Math.cos(a) * d, y: p.y + Math.sin(a) * d },
+        terrain = terrainAt(s, q);
+      if (terrain === T.WATER || terrain === -1) continue;
+      let blocked = false;
+      for (let step = 3; step <= d; step += 1.5)
+        if (
+          treeCollision(
+            s,
+            { x: p.x + Math.cos(a) * step, y: p.y + Math.sin(a) * step },
+            Math.sin((step / d) * Math.PI) * club.loft * d * 0.13,
+            p,
+          )
+        ) {
+          blocked = true;
+          break;
+        }
+      if (blocked) continue;
+      const profile = shotProfile(s, g, p, club, d / max);
+      const dispersion = Math.max(profile.spread, profile.depth) * 2 + 5;
+      let hazardRisk = 0;
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+        [1, 1],
+        [-1, 1],
+      ]) {
+        const tt = terrainAt(s, {
+          x: q.x + dx * dispersion,
+          y: q.y + dy * dispersion,
+        });
+        if (tt === T.WATER || tt === -1) hazardRisk += 3;
+      }
+      const escape = safe.length
+        ? Math.min(...safe.map((v) => dist(v, q)))
+        : 180 - d;
+      const score =
+        hazardRisk +
+        (terrain === T.TREE
+          ? 6 + escape * 0.06
+          : terrain === T.SAND
+            ? 1.2
+            : terrain === T.DEEP
+              ? 1
+              : 0) +
+        dist(q, h.pin) / 350 +
+        0.2 * (1 - d / max);
+      if (score < bestScore) {
+        bestScore = score;
+        best = {
+          club,
+          power: d / max,
+          angle: a,
+          target: q,
+          reason: "Punching low to open ground",
+        };
+      }
+    }
+  return (
+    best || {
+      club,
+      power: 0.3,
+      angle: Math.atan2(h.pin.y - p.y, h.pin.x - p.x),
+      target: h.pin,
+      reason: "Playing a low recovery shot",
+    }
+  );
+}
 export function decideShot(s, g, p, h, route) {
   const direct = dist(p, h.pin),
     cs = clubs(g),
     t = terrainAt(s, p);
+  if (t === T.TREE) return recoveryShot(s, g, p, h);
   if (t === 2 || direct < 4) {
     const c = cs[7],
       sl = slopeAt(s, p);

@@ -1,4 +1,4 @@
-export const VERSION = "1.2.0",
+export const VERSION = "1.2.1",
   CELL = 4,
   GW = 600,
   GH = 450;
@@ -133,6 +133,7 @@ export function initialState() {
     history: [],
     reviews: [],
     totalServed: 0,
+    tutorialComplete: false,
     lifetimeRevenue: 0,
     achievements: [],
     player: makeOwner(),

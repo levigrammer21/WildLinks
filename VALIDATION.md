@@ -1,4 +1,4 @@
-# Wild Links 1.2.0 — validation
+# Wild Links 1.2.1 — validation
 
 Validated on October 7, 2026.
 
@@ -59,3 +59,11 @@ The updated Node suite and Chromium touch acceptance suite passed with zero Java
 - Rechecked the business interface for 6/9/18-hole upgrades, all four plots, an elite six-hole competitive round, winner history and reload.
 
 Firebase account and cloud tests use an isolated response harness. They verify requests, interface behavior and save conflicts without creating a real account or changing the supplied Firebase project's console settings. The owner must enable Email/Password and publish firestore.rules; a live cross-device check is still needed after that setup. Browser touch emulation does not substitute for testing on every physical phone model.
+
+## 1.2.1 regression checks
+
+- 120 seeded recovery trials across beginner and scratch golfers, in a grove and with water blocking the forward route. All escaped within four shots; average recovery shots were 1.08 and 1.18 respectively.
+- Five different ability profiles recovered from tree lies and holed out through sequential simulation without pickups.
+- Course records remain unchanged for worse scores, ties and pickups; alternate tee labels using the Standard position share a comparison. Real alternate tees retain distinct bests. Save/reload reconciles old record history.
+- Actual phone-sized touch events: build/open a hole, confirm the tutorial clears, enter Build again without its return, place a range with one tap, rotate, choose a manual target, confirm construction expenses, and reload. Verified the owner receives the shared Punch shot club in a tree lie.
+- Phone, landscape and tablet viewport checks passed with zero JavaScript runtime errors. The complete original simulation/cloud suite also passed.

@@ -1,3 +1,4 @@
+import { seedRecordBooks } from "./records.js";
 import { initialState, blankHole, GW, GH, VERSION, uid } from "./world.js";
 const KEY = "wild-links-save",
   BACKUP = "wild-links-backup";
@@ -63,7 +64,9 @@ export function deserialize(raw) {
     ...h,
     stats: { ...blankHole(i + 1).stats, ...h.stats },
   }));
+  s.tutorialComplete ||= s.holes.some((h) => h.open) || s.totalServed > 0;
   s.recordHistory ||= [];
+  seedRecordBooks(s);
   if (!d.plots) {
     const sizes = [
         [600, 440],
