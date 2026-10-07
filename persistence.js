@@ -1,4 +1,4 @@
-import { initialState, blankHole, GW, GH, VERSION } from "./world.js";
+import { initialState, blankHole, GW, GH, VERSION, uid } from "./world.js";
 const KEY = "wild-links-save",
   BACKUP = "wild-links-backup";
 const pack = (a) => {
@@ -123,31 +123,79 @@ export function deserialize(raw) {
           warmups: 0,
         };
     }
-  s.version = 4;
+  s.courseId ||= uid();
+  s.journal ||= [];
+  s.facilityPositions ||= {};
+  s.version = 5;
   return s;
 }
 export class LocalStore {
+  constructor(owner = "guest", storage = globalThis.localStorage) {
+    this.owner = owner;
+    this.storage = storage;
+  }
+  prefix() {
+    return "wild-links-vault:" + this.owner + ":";
+  }
+  key(id) {
+    return this.prefix() + "course:" + id;
+  }
+  list() {
+    try {
+      return JSON.parse(this.storage.getItem(this.prefix() + "index") || "[]");
+    } catch {
+      return [];
+    }
+  }
+  get(id) {
+    const raw = this.storage.getItem(this.key(id));
+    if (!raw) return null;
+    return deserialize(raw);
+  }
   load() {
-    for (const key of [KEY, BACKUP]) {
+    const id = this.storage.getItem(this.prefix() + "active");
+    if (id) {
       try {
-        const raw = localStorage.getItem(key);
-        if (raw) return deserialize(raw);
-      } catch (e) {
-        console.warn("Save recovery", e);
+        const value = this.get(id);
+        if (value) return value;
+      } catch {
+        try {
+          const raw = this.storage.getItem(this.key(id) + ":backup");
+          if (raw) return deserialize(raw);
+        } catch {}
       }
     }
+    if (this.owner === "guest")
+      for (const key of [KEY, BACKUP])
+        try {
+          const raw = this.storage.getItem(key);
+          if (raw) return deserialize(raw);
+        } catch {}
     return initialState();
   }
-  save(s) {
+  save(s, { activate = true } = {}) {
     try {
       const data = serialize(s),
-        old = localStorage.getItem(KEY);
-      if (old) localStorage.setItem(BACKUP, old);
-      localStorage.setItem(KEY, data);
+        key = this.key(s.courseId),
+        old = this.storage.getItem(key);
+      if (old) this.storage.setItem(key + ":backup", old);
+      this.storage.setItem(key, data);
+      const rows = this.list().filter((c) => c.id !== s.courseId);
+      rows.unshift({
+        id: s.courseId,
+        name: s.name,
+        day: s.day,
+        holes: s.holes.filter((h) => h.open).length,
+        lastSaved: Date.now(),
+        cloudBase: s.cloudBase || null,
+        cloudDirty: s.cloudDirty || false,
+      });
+      this.storage.setItem(this.prefix() + "index", JSON.stringify(rows));
+      if (activate) this.storage.setItem(this.prefix() + "active", s.courseId);
       s.lastSaved = Date.now();
       return true;
     } catch (e) {
-      console.error(e);
+      console.warn("Local save unavailable", e.message);
       return false;
     }
   }

@@ -648,7 +648,108 @@ svg {
   pointer-events: auto;
   cursor: pointer;
 }
-progress { accent-color: #e8c879; width: min(100%, 280px); height: 8px; border: 0; border-radius: 8px; overflow: hidden; }
-progress::-webkit-progress-bar { background: #385a50; border-radius: 8px; }
-progress::-webkit-progress-value { background: #e8c879; border-radius: 8px; }
-progress::-moz-progress-bar { background: #e8c879; border-radius: 8px; }
+progress {
+  accent-color: #e8c879;
+  width: min(100%, 280px);
+  height: 8px;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+progress::-webkit-progress-bar {
+  background: #385a50;
+  border-radius: 8px;
+}
+progress::-webkit-progress-value {
+  background: #e8c879;
+  border-radius: 8px;
+}
+progress::-moz-progress-bar {
+  background: #e8c879;
+  border-radius: 8px;
+}
+
+#account {
+  position: fixed;
+  left: 12px;
+  top: calc(env(safe-area-inset-top) + 73px);
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 12px;
+  background: #153a32eb;
+  z-index: 3;
+  color: #f3d28e;
+  max-width: 230px;
+}
+#objective {
+  top: calc(env(safe-area-inset-top) + 124px);
+}
+.form-error {
+  color: #f5a99b;
+  min-height: 1em;
+}
+.advice {
+  background: #20443a;
+  border: 1px solid #507454;
+  border-radius: 14px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.advice p {
+  font-size: 13px;
+}
+.trophy {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid #806d3a;
+  background: #524c252b;
+  border-radius: 14px;
+  padding: 15px;
+  margin: 12px 0;
+}
+.trophy > span {
+  font-size: 30px;
+}
+.winner-banner {
+  text-align: center;
+  background: linear-gradient(135deg, #344b31, #63532d);
+  border-radius: 18px;
+  padding: 20px;
+  font-size: 26px;
+}
+.winner-banner h3 {
+  margin: 8px;
+}
+.winner-banner p {
+  font-size: 15px;
+}
+.profile-avatar {
+  background: var(--golfer-color);
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 25px;
+  float: right;
+}
+@media (max-height: 520px) {
+  #account {
+    top: 65px;
+    min-height: 44px;
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+  #objective {
+    top: 115px;
+    max-width: 280px;
+  }
+}
+
+.trophy svg,
+.winner-banner > svg {
+  width: 34px;
+  height: 34px;
+  color: var(--gold);
+}

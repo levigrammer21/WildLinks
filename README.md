@@ -1,4 +1,18 @@
-# Wild Links — v1.1.0
+## New in 1.2
+
+- Email/password accounts with confirmed registration, password recovery, private Firestore course collections, offline local saves, visible sync status and stale-device conflict choices.
+- Multiple properties. Starting a course keeps the previous one. An existing local property can be brought into an account. Importing JSON creates a separate course.
+- Forward, Standard and Championship tees. Optional tees are placed with one tap; missing ones fall back to Standard. AI chooses by ability; the owner and tournaments choose a set. Scores and records retain their tee set.
+- Move or resize an organic green/bunker from Hole Details → Move / resize. A pin follows its green. Facilities and the range can be relocated. Quoted costs and Undo/Redo remain available.
+- Recent landing heatmaps, penalty clusters, scoring by ability and tee set, and actual before/after redesign averages.
+- Regular profiles show favorite holes and friendly rivals based on recorded rounds. Repeat-visit and personal-best entries build the course journal.
+- Twelve named invitees with scheduled tee times, live contenders, follow controls, selected tournament tees, final standings, sponsor/owner awards and a trophy cabinet.
+- Staff recommendations compare recent workload with repair capacity and identify inactive facilities.
+- The owner’s permanent ability still improves through completed holes, not business upgrades or range grinding.
+
+Read **FIREBASE_SETUP.md** and publish **firestore.rules** before using private cloud saves. Firebase console settings require the project owner; the ZIP includes everything needed on the game side.
+
+# Wild Links — v1.2.0
 
 A mobile-first golf course sandbox and tycoon game. Start with an undeveloped property, $5,000, a check-in hut, and capacity for three holes. Paint your own golf architecture, open it to paying visitors, watch their shots, and play the same course yourself.
 
@@ -6,7 +20,7 @@ A mobile-first golf course sandbox and tycoon game. Start with an undeveloped pr
 
 1. Extract this ZIP. Upload **the files inside it directly into your repository root**, including `.nojekyll` if your upload method supports it. Do not upload a containing folder.
 2. Enable GitHub Pages for that branch, serving the repository root.
-3. Open your Pages address in a modern browser. There is **no build step, backend, account, API key, or dependency installation** needed to play.
+3. Open your Pages address in a modern browser. There is **no build step or dependency installation** needed to play locally. The configured Firebase project supports optional account/cloud saving; publish the supplied rules and enable Email/Password as described in FIREBASE_SETUP.md.
 
 The `index.html` file must be served over HTTP or HTTPS; double-clicking it as a local `file://` document will not load JavaScript modules consistently. For local desktop testing, run `python3 -m http.server 8080` in the repository, then open `http://localhost:8080`. GitHub Pages provides HTTPS automatically.
 
@@ -47,7 +61,7 @@ Every visitor is remembered, including their abilities, preferences, visits, sat
 
 Build a driving range from Facilities: tap its tee, then its target, and confirm the quoted cost. Visitors sometimes hit three real practice shots before their tee time, paying $3 for practice or $7 with coaching. Three practice bays prevent crowding.
 
-Tournaments require at least 6, 9 or 18 open holes, cost $350 / $600 / $1,200 to host, and run for two operating days. Choose an ability audience, watch the live leaderboard, and earn $22 for each completed competitive round. Each golfer’s best round counts. Event hole designs and pars are locked until the event ends; owner rounds with the same routing also qualify. Winners remain in tournament history.
+Tournaments require at least 6, 9 or 18 open holes, cost $350 / $600 / $1,200 to host, and run for two operating days. Choose an ability audience, watch the live leaderboard, and earn $22 for each completed competitive round. Each golfer’s best round counts. Event hole designs and pars are locked until the event ends; owner rounds with the same routing and tee set also qualify. Winners remain in tournament history.
 
 Facilities add comfort and services. Staff do specific jobs: groundskeepers repair wear, check-in workers shorten admission intervals and operate the shop, mechanics enable faster cart travel, professionals add paid range coaching, and service staff operate the café. Facility care and wages are charged daily. Beyond 18 holes, improve reputation, refine your architecture, run tournaments and pursue course records.
 
@@ -57,27 +71,30 @@ Records include hole scoring, longest drives, longest holed putts, closest appro
 
 Autosaves run every 20 seconds and after important changes. Ongoing rounds, their shot state, course terrain, height, business, statistics and personal skills are saved. A previous-save backup is retained. Versioned loading merges new defaults into older compatible saves without deliberately resetting progress.
 
-Clubhouse → Save offers manual saving, JSON export/import and course naming. Saves are local to this browser and this site address. **Export a backup before clearing browser storage or switching devices.** Cloud saving is not enabled without backend credentials; the persistence adapter is isolated so it can be replaced later.
+Clubhouse → Save offers manual saving, JSON export/import and course naming. Local saves are specific to this browser and site address; signed-in courses also synchronize with Firestore. **Export a backup before clearing browser storage or switching devices.** Cloud saving uses the supplied Firebase project. Local and cloud adapters remain separate.
 
 A service worker provides an offline fallback after the app has loaded successfully online. If you change the deployed game files yourself, use a new cache version in `sw.js`. The network is preferred, so ordinary updates appear without erasing saves.
 
 ## Root-only project structure
 
-| File                                        | Purpose                                                                         |
-| ------------------------------------------- | ------------------------------------------------------------------------------- |
-| `index.html`, `style.css`                   | Responsive game shell and bottom-sheet interface                                |
-| `app.js`                                    | Touch controls, editor transactions, HUD and management UI                      |
-| `world.js`                                  | Terrain, brushes, property, hole definitions and architecture analysis          |
-| `golf.js`                                   | Golfer generation, club selection, shot AI and shared execution physics         |
-| `club.js`                                   | Plot purchases, course goals, returning golfers, tournaments and staff status   |
-| `simulation.js`                             | Visitors, queues, shot states, economy, records, progression and operating days |
-| `render.js`                                 | Cached Canvas terrain, golfers, trajectory previews and camera                  |
-| `persistence.js`                            | Versioned, compressed saves and backup adapter                                  |
-| `sw.js`, `manifest.webmanifest`, `icon.svg` | Offline fallback and app metadata                                               |
-| `tests.mjs`, `package.json`                 | Dependency-free Node simulation acceptance checks                               |
-| `.nojekyll`                                 | Direct static hosting marker                                                    |
+| File                                               | Purpose                                                                         |
+| -------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `index.html`, `style.css`                          | Responsive game shell and bottom-sheet interface                                |
+| `app.js`                                           | Touch controls, editor transactions, HUD and management UI                      |
+| `world.js`                                         | Terrain, brushes, property, hole definitions and architecture analysis          |
+| `golf.js`                                          | Golfer generation, club selection, shot AI and shared execution physics         |
+| `club.js`                                          | Plot purchases, course goals, returning golfers, tournaments and staff status   |
+| `simulation.js`                                    | Visitors, queues, shot states, economy, records, progression and operating days |
+| `render.js`                                        | Cached Canvas terrain, golfers, trajectory previews and camera                  |
+| `cloud.js`, `firestore.rules`, `FIREBASE_SETUP.md` | Firebase accounts, chunked private cloud saves, access rules and setup          |
+| `design.js`                                        | Tee sets, feature transforms, landing clusters, journal and staff advice        |
+| `cloud-tests.mjs`                                  | Mocked Firebase, cloud conflict and design acceptance checks                    |
+| `persistence.js`                                   | Versioned, compressed saves and backup adapter                                  |
+| `sw.js`, `manifest.webmanifest`, `icon.svg`        | Offline fallback and app metadata                                               |
+| `tests.mjs`, `package.json`                        | Dependency-free Node simulation acceptance checks                               |
+| `.nojekyll`                                        | Direct static hosting marker                                                    |
 
-All project files are at the repository root. No external fonts, images, libraries or runtime requests are needed.
+All project files are at the repository root. No external fonts, images or runtime libraries are needed. Account features make HTTPS requests to Firebase; guest play works offline after the first load.
 
 ## Verification
 

@@ -1,3 +1,4 @@
+import { landingClusters } from "./design.js";
 import {
   CELL,
   GW,
@@ -169,6 +170,7 @@ export class Renderer {
     this.facilities(ctx);
     this.practice(ctx);
     this.trails(ctx);
+    this.designOverlay(ctx);
     for (let i = 0; i < s.holes.length; i++)
       this.hole(
         ctx,
@@ -195,9 +197,10 @@ export class Renderer {
         ctx.fillRect(p.x, p.y, p.w, p.h);
         this.label(
           ctx,
+          p.name + " · land for sale",
           p.x + p.w / 2,
           p.y + p.h / 2,
-          p.name + " · land for sale",
+          "#122e29c9",
         );
       }
       ctx.strokeStyle = "#efe6c655";
@@ -332,7 +335,13 @@ export class Renderer {
     const r = this.s.range || this.rangeDraft;
     if (!r?.tee) return;
     if (!r.target) {
-      this.label(ctx, r.tee.x, r.tee.y - 18, "RANGE TEE · choose target");
+      this.label(
+        ctx,
+        "RANGE TEE · choose target",
+        r.tee.x,
+        r.tee.y - 18,
+        "#122e29c9",
+      );
       return;
     }
     const z = this.camera.zoom;
@@ -353,7 +362,7 @@ export class Renderer {
     ctx.fillStyle = "#dacd96";
     for (let i = 0; i < 3; i++)
       ctx.fillRect(r.tee.x + i * 6 - 3, r.tee.y - 3, 5, 6);
-    this.label(ctx, r.tee.x, r.tee.y - 18, "DRIVING RANGE");
+    this.label(ctx, "DRIVING RANGE", r.tee.x, r.tee.y - 18, "#122e29c9");
     ctx.restore();
   }
   trails(ctx) {
@@ -382,6 +391,54 @@ export class Renderer {
       ctx.fill();
     }
     ctx.restore();
+  }
+  designOverlay(ctx) {
+    const s = this.s,
+      z = this.camera.zoom;
+    if (s.heatmap) {
+      const last = s.trails.at(-1),
+        key = (s.feedbackHole || "") + ":" + s.trailFilter;
+      if (last !== this.heatLast || key !== this.heatKey) {
+        this.heatLast = last;
+        this.heatKey = key;
+        this.clusters = landingClusters(s, {
+          hole: s.feedbackHole,
+          filter: s.trailFilter,
+        });
+      }
+      for (const c of this.clusters || []) {
+        const radius = Math.min(30, 7 + Math.sqrt(c.n) * 3);
+        ctx.fillStyle = c.penalties ? "#f1806455" : "#f5d17750";
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, radius, 0, 7);
+        ctx.fill();
+        if (c.n > 2 && z > 0.5) {
+          ctx.font = "bold " + Math.max(8, 10 / z) + "px system-ui";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#fff5d6";
+          ctx.fillText(String(c.n), c.x, c.y + 3 / z);
+        }
+      }
+    }
+    const f = this.editFeature;
+    if (f) {
+      ctx.save();
+      ctx.strokeStyle = "#fff1a8";
+      ctx.lineWidth = 2 / z;
+      ctx.setLineDash([5 / z, 4 / z]);
+      if (f.points) {
+        const xs = f.points.map((p) => p.x),
+          ys = f.points.map((p) => p.y),
+          x = Math.min(...xs) - 3,
+          y = Math.min(...ys) - 3;
+        ctx.strokeRect(x, y, Math.max(...xs) - x + 3, Math.max(...ys) - y + 3);
+      } else {
+        ctx.beginPath();
+        ctx.arc(f.center.x, f.center.y, 24, 0, 7);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
   hole(ctx, h, i, selected) {
     let z = this.camera.zoom;
@@ -418,6 +475,18 @@ export class Renderer {
         h.tee.y + 19,
         h.open ? "#173a30" : "#6d6244",
       );
+    }
+    for (const [set, p] of Object.entries(h.tees || {})) {
+      ctx.fillStyle = set === "forward" ? "#ef9e92" : "#9ccae8";
+      ctx.fillRect(p.x - 5, p.y - 3, 10, 6);
+      if (selected || this.camera.zoom > 0.8)
+        this.label(
+          ctx,
+          set === "forward" ? "F" : "C",
+          p.x,
+          p.y + 17,
+          "#122e29c9",
+        );
     }
     if (h.pin) {
       ctx.fillStyle = "#244e31";

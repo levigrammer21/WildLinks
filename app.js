@@ -1,5 +1,6 @@
 import {
   VERSION,
+  initialState,
   CELL,
   T,
   TOOLS,
@@ -38,6 +39,19 @@ import {
   golferFit,
   staffStatus,
 } from "./club.js";
+import { CloudStore } from "./cloud.js";
+import {
+  TEE_NAMES,
+  teeFor,
+  teePar,
+  addJournal,
+  staffAdvice,
+  landingClusters,
+  selectFeature,
+  planTransform,
+  applyTransform,
+  revisionFeedback,
+} from "./design.js";
 import { Renderer } from "./render.js";
 const $ = (id) => document.getElementById(id),
   money = (n) => "$" + Math.round(n).toLocaleString(),
@@ -53,7 +67,11 @@ const $ = (id) => document.getElementById(id),
           "'": "&#39;",
         })[c],
     );
-let store = new LocalStore(),
+let cloud = new CloudStore({
+    onStatus: (status) => updateCloudBadge(status),
+    onUser: (user) => accountChanged(user),
+  }),
+  store = new LocalStore(cloud.session?.uid || "guest"),
   s = store.load(),
   sim = new Simulation(s, toast),
   renderer = new Renderer($("course"), s),
@@ -77,7 +95,9 @@ let store = new LocalStore(),
   lastUI = 0,
   lastSave = 0,
   autoFollow = false,
-  rangeDraft = null;
+  rangeDraft = null,
+  objectDraft = null,
+  cloudConnecting = false;
 if (s.activeVisits) {
   sim.visits = s.activeVisits.filter((v) => !v.finished);
   for (const v of sim.visits)
@@ -96,7 +116,11 @@ renderer.frame();
 sim.onDaily = (summary) => {
   save();
   if (!s.holes.some((h) => h.open)) return;
-  if ($("overlay").hidden && mode !== "play") showDaily(summary);
+  if ($("overlay").hidden && mode !== "play") {
+    const event = s.tournamentHistory[0];
+    if (event?.ends === summary.day) showEventResults(event);
+    else showDaily(summary);
+  }
 };
 sim.onRound = (v, rec) => {
   renderer.preview = null;
@@ -115,8 +139,13 @@ function toast(message) {
 function save(manual = false) {
   if (tx || pending) return false;
   s.activeVisits = sim.visits.filter((v) => !v.finished);
+  if (cloud.session && cloud.ready) s.cloudDirty = true;
   if (store.save(s)) {
-    if (manual) toast("Course saved.");
+    if (cloud.session && cloud.ready) cloud.queue(s, serialize(s), manual);
+    if (manual)
+      toast(
+        cloud.session ? "Saved locally. Cloud sync queued." : "Course saved.",
+      );
     return true;
   }
   toast("Storage is full or unavailable. Export your save from the clubhouse.");
@@ -134,7 +163,8 @@ function closeSheet() {
 }
 $("closeSheet").onclick = closeSheet;
 $("overlay").onclick = (e) => {
-  if (e.target === $("overlay") && !rangeDraft?.target) closeSheet();
+  if (e.target === $("overlay") && !rangeDraft?.target && !objectDraft?.feature)
+    closeSheet();
 };
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeSheet();
@@ -153,6 +183,8 @@ function setMode(m) {
   mode = m;
   renderer.mode = m;
   renderer.preview = null;
+  objectDraft = null;
+  renderer.editFeature = null;
   rangeDraft = null;
   renderer.rangeDraft = null;
   if (m === "build") {
@@ -179,6 +211,7 @@ $("watch").onclick = () => {
 };
 $("play").onclick = showPlay;
 $("trails").onclick = showTrails;
+$("account").onclick = showAccount;
 $("clubhouse").onclick = () => showClub("overview");
 $("brand").onclick = () => showClub("overview");
 $("time").onclick = () => {
@@ -222,6 +255,8 @@ function renderTools() {
     .forEach(
       (b) =>
         (b.onclick = () => {
+          objectDraft = null;
+          renderer.editFeature = null;
           rangeDraft = null;
           renderer.rangeDraft = null;
           tool = b.dataset.tool;
@@ -231,7 +266,16 @@ function renderTools() {
     );
 }
 function newTx() {
-  return { cells: new Map(), holes: structuredClone(s.holes), cost: 0, tool };
+  return {
+    cells: new Map(),
+    holes: structuredClone(s.holes),
+    structures: structuredClone({
+      range: s.range,
+      facilityPositions: s.facilityPositions,
+    }),
+    cost: 0,
+    tool,
+  };
 }
 function restoreTx(t) {
   for (const [i, v] of t.cells) {
@@ -239,6 +283,7 @@ function restoreTx(t) {
     s.heights[i] = v.h;
   }
   s.holes = restoreLayouts(t.holes);
+  if (t.structures) Object.assign(s, structuredClone(t.structures));
   renderer.dirty = true;
   renderer.preview = null;
 }
@@ -249,6 +294,8 @@ function restoreLayouts(layouts) {
     const live = current.get(h.id);
     if (live) {
       h.stats = live.stats;
+      h.teeStats = live.teeStats;
+      h.revisionStats = live.revisionStats;
       h.open = live.open;
     }
     if (h.open && validateHole(s, h)) h.open = false;
@@ -266,6 +313,11 @@ function commitTx(t) {
   }
   const entry = {
     before: t.holes,
+    beforeStructures: t.structures,
+    afterStructures: structuredClone({
+      range: s.range,
+      facilityPositions: s.facilityPositions,
+    }),
     after: structuredClone(s.holes),
     cells: [],
     cost,
@@ -281,7 +333,23 @@ function commitTx(t) {
   undo.push(entry);
   if (undo.length > 40) undo.shift();
   redo = [];
+  const h = s.holes[holeIndex],
+    oldRev = h.revisionStats?.[h.revision];
+  if (oldRev?.n) {
+    h.designBaseline = { ...oldRev };
+    addJournal(
+      s,
+      "Redesign of " + h.name,
+      "Before this redesign: " +
+        (oldRev.total / oldRev.n).toFixed(2) +
+        " strokes over " +
+        oldRev.n +
+        " plays. Inspect design feedback for the new results.",
+      { hole: h.id },
+    );
+  }
   s.holes[holeIndex].revision++;
+  entry.after = structuredClone(s.holes);
   sim.invalidate();
   renderer.dirty = true;
   save();
@@ -292,6 +360,10 @@ function finishTx() {
   if (!tx) {
     lastPoint = null;
     if (rangeDraft?.target) confirmRangePlacement();
+    if (objectDraft?.show) {
+      objectDraft.show = false;
+      objectSheet();
+    }
     return;
   }
   let t = tx;
@@ -338,6 +410,8 @@ function undoAction(isRedo) {
     s.heights[cell.i] = v.h;
   }
   s.holes = restoreLayouts(isRedo ? entry.after : entry.before);
+  const structures = isRedo ? entry.afterStructures : entry.beforeStructures;
+  if (structures) Object.assign(s, structuredClone(structures));
   s.cash += isRedo ? -entry.cost : entry.cost;
   s.daily.expenses += isRedo ? entry.cost : -entry.cost;
   holeIndex = Math.min(holeIndex, s.holes.length - 1);
@@ -378,6 +452,10 @@ function paint(p) {
   const h = s.holes[holeIndex],
     l = landSize(s);
   if (!ownedAt(s, p)) return;
+  if (tool === "object" && objectDraft) {
+    objectTap(p);
+    return;
+  }
   if (rangeDraft) {
     if (lastPoint) return;
     lastPoint = p;
@@ -405,6 +483,16 @@ function paint(p) {
     return;
   }
   if (!tx) tx = newTx();
+  if (tool.startsWith("tee:")) {
+    if (lastPoint) return;
+    const set = tool.split(":")[1];
+    h.tees ||= {};
+    h.tees[set] = { ...p };
+    stamp(s, p, 8, T.FAIRWAY, tx);
+    tx.cost = 80;
+    lastPoint = p;
+    return;
+  }
   if (tool === "tee") {
     if (lastPoint) return;
     h.tee = { ...p };
@@ -472,6 +560,17 @@ function openHole() {
     return;
   }
   h.open = true;
+  addJournal(
+    s,
+    "Hole opened",
+    h.name +
+      " · Par " +
+      h.par +
+      " · " +
+      Math.round(dist(h.tee, h.pin)) +
+      " yd.",
+    { hole: h.id },
+  );
   s.opened = true;
   s.minute = Math.min(s.minute, 1020);
   sim.arrival = 1;
@@ -484,6 +583,19 @@ function openHole() {
   autoFollow = true;
 }
 function objective() {
+  if (objectDraft)
+    return (
+      "<b>Simple shape editor</b><br>" +
+      (objectDraft.stage === "move"
+        ? "Tap the new center on owned land."
+        : "Tap a green, bunker, range tee or building.")
+    );
+  if (tool.startsWith("tee:"))
+    return (
+      "<b>Place " +
+      TEE_NAMES[tool.split(":")[1]] +
+      " tee</b><br>Tap a location on your land. Work costs $80."
+    );
   if (rangeDraft)
     return (
       "<b>Place your driving range</b><br>" +
@@ -642,7 +754,7 @@ function showPlay() {
     });
   sheet(
     "Play your course",
-    `<p>You start as a recreational golfer. Pull back from your ball to aim and set power. The landing region shows uncertainty, not a guaranteed result.</p><div class="grid"><div class="stat"><strong>${Math.round(s.player.drive)} yd</strong><small>Driver carry + roll</small></div><div class="stat"><strong>${Math.round((1 - s.player.skill) * 36)}</strong><small>Estimated handicap</small></div></div><h3>Choose your round</h3><div class="row">${options.map((o, i) => `<button class="primary" data-round="${i}">${o.label}</button>`).join("")}</div><p class="note">The course keeps operating while you play. Golf ability improves through completed holes.</p>`,
+    `<p>You start as a recreational golfer. Pull back from your ball to aim and set power. The landing region shows uncertainty, not a guaranteed result.</p><div class="grid"><div class="stat"><strong>${Math.round(s.player.drive)} yd</strong><small>Driver carry + roll</small></div><div class="stat"><strong>${Math.round((1 - s.player.skill) * 36)}</strong><small>Estimated handicap</small></div></div><label class="field">Tee set<select id="playTees"><option value="standard">Standard</option><option value="forward">Forward · shorter routes</option><option value="championship">Championship · longer challenge</option></select></label><p class="note">A missing optional tee uses Standard. Tournament entries must use the event tee set.</p><h3>Choose your round</h3><div class="row">${options.map((o, i) => `<button class="primary" data-round="${i}">${o.label}</button>`).join("")}</div><p class="note">The course keeps operating while you play. Golf ability improves through completed holes.</p>`,
   );
   $("sheetBody")
     .querySelectorAll("[data-round]")
@@ -652,7 +764,7 @@ function showPlay() {
           let hs = options[+b.dataset.round].ids.map((id) =>
               s.holes.find((h) => h.id === id),
             ),
-            v = sim.startPlayer(hs);
+            v = sim.startPlayer(hs, $("playTees").value);
           selected = v.id;
           mode = "play";
           renderer.mode = mode;
@@ -854,7 +966,7 @@ function showHole(i) {
               "",
             )}</div><p class="note">Architecture estimates inspect playable corridors. Actual scoring below comes from every simulated shot, including yours. Difficult holes can be excellent.</p>`
         : "<p>Place a tee, green and pin to analyze this hole.</p>"
-    }<h3>Played history</h3><div class="grid"><div class="stat"><strong>${st.plays ? (st.total / st.plays).toFixed(2) : "—"}</strong><small>Average score · ${st.plays} plays</small></div><div class="stat"><strong>${st.low?.value ?? "—"}</strong><small>Lowest score ${st.low ? "· " + esc(st.low.name) : ""}</small></div></div><table><tr><th>Golfer level</th><th>Actual average</th><th>Rounds</th></tr>${["Beginners", "Club golfers", "Scratch golfers"].map((n, j) => `<tr><td>${n}</td><td>${st.buckets[j].n ? (st.buckets[j].total / st.buckets[j].n).toFixed(2) : "—"}</td><td>${st.buckets[j].n}</td></tr>`).join("")}</table><p>${st.birdies} birdies or better · ${st.pars} pars · ${st.bogeys} bogeys · ${st.double} double+</p><h3>Hole records</h3>${["drive", "putt", "approach"].map((k) => `<div class="item"><div><b>${{ drive: "Longest drive", putt: "Longest holed putt", approach: "Closest approach" }[k]}</b><p>${st[k] ? Math.round(st[k].value * 10) / 10 + " yd · " + esc(st[k].name) + " · Day " + st[k].day : "No record yet"}</p></div></div>`).join("")}<p>Hole-in-ones: ${st.aces.length}${
+    }<div class="row"><button id="teeSets">Tee sets</button><button id="shapeEdit">Move / resize</button><button id="designFeedback">Design feedback</button></div><h3>Played history</h3><div class="grid"><div class="stat"><strong>${st.plays ? (st.total / st.plays).toFixed(2) : "—"}</strong><small>Average score · ${st.plays} plays</small></div><div class="stat"><strong>${st.low?.value ?? "—"}</strong><small>Lowest score ${st.low ? "· " + esc(st.low.name) : ""}</small></div></div><table><tr><th>Golfer level</th><th>Actual average</th><th>Rounds</th></tr>${["Beginners", "Club golfers", "Scratch golfers"].map((n, j) => `<tr><td>${n}</td><td>${st.buckets[j].n ? (st.buckets[j].total / st.buckets[j].n).toFixed(2) : "—"}</td><td>${st.buckets[j].n}</td></tr>`).join("")}</table><p>${st.birdies} birdies or better · ${st.pars} pars · ${st.bogeys} bogeys · ${st.double} double+</p><h3>Hole records</h3>${["drive", "putt", "approach"].map((k) => `<div class="item"><div><b>${{ drive: "Longest drive", putt: "Longest holed putt", approach: "Closest approach" }[k]}</b><p>${st[k] ? Math.round(st[k].value * 10) / 10 + " yd · " + esc(st[k].name) + " · Day " + st[k].day : "No record yet"}</p></div></div>`).join("")}<p>Hole-in-ones: ${st.aces.length}${
       st.aces.length
         ? " · " +
           st.aces
@@ -864,6 +976,9 @@ function showHole(i) {
         : ""
     }</p>`,
   );
+  $("teeSets").onclick = () => showTeeSets(i);
+  $("shapeEdit").onclick = () => startObjectEdit(i);
+  $("designFeedback").onclick = () => showDesignFeedback(i);
   $("editHole").onclick = () => {
     holeIndex = i;
     renderer.activeHole = i;
@@ -895,7 +1010,8 @@ const tabs = [
   ["records", "Records"],
   ["player", "Your golf"],
   ["reviews", "Feedback"],
-  ["save", "Save"],
+  ["journal", "Journal"],
+  ["save", "Save & courses"],
 ];
 function showClub(tab = "overview") {
   activeTab = tab;
@@ -918,6 +1034,7 @@ function showClub(tab = "overview") {
   if (tab === "player") clubPlayer(content);
   if (tab === "reviews") clubReviews(content);
   if (tab === "save") clubSave(content);
+  if (tab === "journal") clubJournal(content);
 }
 function clubOverview(el) {
   let n = s.holes.filter((h) => h.open).length,
@@ -1052,7 +1169,37 @@ function showMember(id) {
   const v = sim.visits.find((v) => v.memberId === id && !v.finished);
   sheet(
     m.profile.name,
-    `<p>${esc(m.profile.archetype)} · HCP ${Math.round((1 - m.profile.skill) * 36)} · ${m.visits} visits · ${m.rounds} completed rounds</p><p>${esc(golferFit(s, m))}</p><p>Best round: ${m.best ? m.best.score + " (" + relative(m.best.relative) + ") over " + m.best.holes + " holes" : "Not yet recorded"} · ${m.warmups} range sessions</p><table><tr><th>Hole</th><th>Average</th><th>Plays</th></tr>${s.holes
+    `<div class="profile-avatar" style="--golfer-color:${esc(m.profile.color || "#e8c879")}">⛳</div><p>${esc(m.profile.archetype)} · HCP ${Math.round((1 - m.profile.skill) * 36)} · ${m.visits} visits · ${m.rounds} completed rounds</p><p>${esc(golferFit(s, m))}</p><h3>Favorite hole</h3><p>${(() => {
+      const ranked = s.holes
+        .filter((h) => m.holeHistory[h.id]?.n)
+        .sort(
+          (a, b) =>
+            m.holeHistory[a.id].strokes / m.holeHistory[a.id].n -
+            a.par -
+            (m.holeHistory[b.id].strokes / m.holeHistory[b.id].n - b.par),
+        );
+      return ranked[0]
+        ? esc(ranked[0].name) + " · best average relative to par"
+        : "Their played history will reveal a favorite.";
+    })()}</p><h3>Friendly rivals</h3><p>${
+      Object.values(s.members)
+        .filter(
+          (other) =>
+            other.id !== m.id &&
+            other.best &&
+            m.best &&
+            other.best.layout === m.best.layout,
+        )
+        .sort(
+          (a, b) =>
+            Math.abs(a.best.score - m.best.score) -
+            Math.abs(b.best.score - m.best.score),
+        )
+        .slice(0, 3)
+        .map((other) => esc(other.profile.name) + " · best " + other.best.score)
+        .join("<br>") ||
+      "Other golfers need a recorded round on the same routing and tees."
+    }</p><p>Best round: ${m.best ? m.best.score + " (" + relative(m.best.relative) + ") over " + m.best.holes + " holes" : "Not yet recorded"} · ${m.warmups} range sessions</p><table><tr><th>Hole</th><th>Average</th><th>Plays</th></tr>${s.holes
       .map((h) => {
         const r = m.holeHistory[h.id];
         return `<tr><td>${esc(h.name)}</td><td>${r ? (r.strokes / r.n).toFixed(2) : "—"}</td><td>${r?.n || 0}</td></tr>`;
@@ -1071,12 +1218,35 @@ function showMember(id) {
       updateUI();
     };
 }
+let eventLiveHash = "";
+function eventHash() {
+  const t = s.tournament;
+  return t
+    ? JSON.stringify([
+        t.entries,
+        t.schedule,
+        sim.visits
+          .filter((v) => !v.finished && v.eventId === t.id)
+          .map((v) => [v.id, v.holeIndex, v.strokes, v.scores.length]),
+      ])
+    : "";
+}
 function clubEvents(el) {
+  eventLiveHash = eventHash();
   const n = s.holes.filter((h) => h.open).length,
     t = s.tournament;
   el.innerHTML = `<p>Tournaments run for two operating days on a fixed 6, 9 or 18-hole routing. Only completed event rounds qualify; each golfer’s best score counts. Entry receipts are earned when a round finishes.</p>${
     t
-      ? `<h3>${esc(t.name)} · ${esc(t.audience)}</h3><p>Ends after Day ${t.ends}. Event holes cannot be redesigned until it ends.</p><table><tr><th>Golfer</th><th>Score</th></tr>${eventBoard(
+      ? `<h3>${esc(t.name)} · ${esc(t.audience)}</h3><p>${TEE_NAMES[t.teeSet || "standard"]} tees · Ends after Day ${t.ends}. Course editing pauses during the event.</p><div class="row"><button id="eventRefresh">Refresh leaderboard</button><button id="joinEvent">Play this event</button></div><h3>On the course</h3>${
+          sim.visits
+            .filter((v) => !v.finished && v.eventId === t.id)
+            .map(
+              (v) =>
+                `<div class="item"><div><b>${esc(v.golfer.name)}</b><p>Hole ${v.holeIndex + 1} · ${relative(v.scores.reduce((a, x) => a + x.score - x.par, 0))} · ${v.strokes} strokes</p></div><button data-contender="${v.id}">Follow</button></div>`,
+            )
+            .join("") ||
+          "<p>Next entrants are preparing for their scheduled tee times.</p>"
+        }<h3>Completed rounds</h3><table><tr><th>Golfer</th><th>Score</th></tr>${eventBoard(
           s,
         )
           .map(
@@ -1084,12 +1254,65 @@ function clubEvents(el) {
               `<tr><td>${esc(e.name)}</td><td>${e.score} (${relative(e.relative)})</td></tr>`,
           )
           .join("")}</table>`
-      : `<label class="field">Invite golfers<select id="eventAudience"><option value="open">All abilities</option><option value="beginners">Beginners</option><option value="club">Club golfers</option><option value="elite">Elite golfers</option></select></label>${EVENTS.map((e) => `<div class="item"><div><b>${e.name}</b><p>${e.holes} open holes required · ${money(e.cost)} hosting · $22 per completed entry</p></div><button data-event="${e.id}" ${n < e.holes || s.cash < e.cost ? "disabled" : ""}>Host</button></div>`).join("")}`
-  }<h3>Tournament history</h3>${s.tournamentHistory.map((e) => `<div class="item"><div><b>${esc(e.name)}</b><p>${e.winner ? esc(e.winner.name) + " · " + e.winner.score + " (" + relative(e.winner.relative) + ")" : "No completed entries"} · Day ${e.ends}</p></div></div>`).join("") || "<p>Your first tournament will become part of the club’s history.</p>"}`;
+      : `<label class="field">Event tee set<select id="eventTees"><option value="standard">Standard</option><option value="forward">Forward</option><option value="championship">Championship</option></select></label><label class="field">Invite golfers<select id="eventAudience"><option value="open">All abilities</option><option value="beginners">Beginners</option><option value="club">Club golfers</option><option value="elite">Elite golfers</option></select></label>${EVENTS.map((e) => `<div class="item"><div><b>${e.name}</b><p>${e.holes} open holes required · ${money(e.cost)} hosting · $22 per completed entry</p></div><button data-event="${e.id}" ${n < e.holes || s.cash < e.cost ? "disabled" : ""}>Host</button></div>`).join("")}`
+  }<h3>Tournament history</h3>${s.tournamentHistory.map((e) => `<div class="item"><div><b>${esc(e.name)}</b><p>${e.winner ? esc(e.winner.name) + " · " + e.winner.score + " (" + relative(e.winner.relative) + ")" : "No completed entries"} · Day ${e.ends}</p></div><button data-event-result="${e.id}">Results</button></div>`).join("") || "<p>Your first tournament will become part of the club’s history.</p>"}`;
+  el.querySelectorAll("[data-event-result]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        showEventResults(
+          s.tournamentHistory.find((t) => t.id === b.dataset.eventResult),
+        )),
+  );
+  if (t) {
+    $("eventRefresh").onclick = () => showClub("events");
+    $("joinEvent").onclick = () => {
+      if (sim.playerVisit && !sim.playerVisit.finished)
+        return toast("Finish or end your current round before entering.");
+      const v = sim.startPlayer(
+        t.holes.map((id) => s.holes.find((h) => h.id === id)),
+        t.teeSet || "standard",
+      );
+      closeSheet();
+      mode = "play";
+      renderer.mode = mode;
+      selected = v.id;
+      renderer.follow = v.id;
+      speed = 1;
+      prepareShot();
+      save();
+      updateUI();
+    };
+    el.querySelectorAll("[data-contender]").forEach(
+      (b) =>
+        (b.onclick = () => {
+          closeSheet();
+          setMode("watch");
+          selected = b.dataset.contender;
+          renderer.follow = selected;
+          updateUI();
+        }),
+    );
+    el.insertAdjacentHTML(
+      "beforeend",
+      `<h3>Invited field</h3>${(t.schedule || []).map((e) => `<div class="item"><div><b>${esc(s.members[e.memberId]?.profile.name || "Invited member")}</b><p>Day ${e.day} · ${String(Math.floor(e.minute / 60)).padStart(2, "0")}:${String(Math.floor(e.minute % 60)).padStart(2, "0")} · ${e.admitted ? "Checked in" : "Scheduled"}</p></div></div>`).join("")}`,
+    );
+  }
+  if (!t)
+    el.insertAdjacentHTML(
+      "beforeend",
+      '<p class="note">Sponsor awards: $25 per completed unique visitor. Owner winner prize: $100 / $250 / $500. Each event invites 12 eligible golfers. Practice builds confidence; completed holes build ability.</p>',
+    );
   el.querySelectorAll("[data-event]").forEach(
     (b) =>
       (b.onclick = () => {
-        if (startTournament(s, b.dataset.event, $("eventAudience").value)) {
+        if (
+          startTournament(
+            s,
+            b.dataset.event,
+            $("eventAudience").value,
+            $("eventTees").value,
+          )
+        ) {
           sim.arrival = 1;
           save();
           showClub("events");
@@ -1115,9 +1338,11 @@ function showTrails() {
       )
       .join(
         "",
-      )}</select></label><button id="applyTrails" class="primary">Apply overlay</button>`,
+      )}</select></label><label class="field">Landing heatmap<input id="heatToggle" type="checkbox" ${s.heatmap ? "checked" : ""}></label><button id="applyTrails" class="primary">Apply overlay</button>`,
   );
   $("applyTrails").onclick = () => {
+    s.heatmap = $("heatToggle").checked;
+    s.feedbackHole = null;
     s.showTrails = $("trailSelect").value !== "off";
     s.trailFilter = $("trailSelect").value;
     save();
@@ -1166,7 +1391,11 @@ function clubFacilities(el) {
 }
 function clubStaff(el) {
   el.innerHTML =
-    `<p>Staff have practical jobs. Wages are charged when the day ends. Current wages: ${money(STAFF.reduce((a, f) => a + s.staff[f.id] * f.wage, 0))} per day.</p>` +
+    `<div class="advice"><b>Suggested staffing</b>${staffAdvice(s)
+      .map((a) => `<p>${esc(a)}</p>`)
+      .join(
+        "",
+      )}</div><p>Staff have practical jobs. Wages are charged when the day ends. Current wages: ${money(STAFF.reduce((a, f) => a + s.staff[f.id] * f.wage, 0))} per day.</p>` +
     STAFF.map(
       (f) =>
         `<div class="item"><div><b>${f.name} · ${s.staff[f.id]}</b><p>${staffStatus(s, f.id).status}</p><p class="note">${staffStatus(s, f.id).tip}</p><small>${staffStatus(s, f.id).active ? "Working" : "Inactive"} · ${money(f.wage)} per day each</small></div><button data-fire="${f.id}" ${s.staff[f.id] ? "" : "disabled"} aria-label="Release ${f.name}">−</button><button data-hire="${f.id}" ${s.staff[f.id] >= ({ desk: 3, mechanic: 1, pro: 1, service: 1 }[f.id] || 12) ? "disabled" : ""} aria-label="Hire ${f.name}">+</button></div>`,
@@ -1190,6 +1419,12 @@ function clubStaff(el) {
 }
 function clubRecords(el) {
   el.innerHTML =
+    `<h3>Records by routing and tees</h3>${Object.values(s.recordBook || {})
+      .map(
+        (r) =>
+          `<div class="item"><div><b>${r.holes} holes · ${TEE_NAMES[r.teeSet || "standard"]} tees</b><p>${esc(r.name)} · ${r.score} (${relative(r.relative)}) · Day ${r.day}</p></div></div>`,
+      )
+      .join("")}` +
     "<p>Records come from fully played rounds. New routing configurations establish their own current records; daily history and hole statistics stay with your property.</p>" +
     [
       ["overall", "Developing course record"],
@@ -1312,7 +1547,9 @@ function clubReviews(el) {
     .join("")}`;
 }
 function clubSave(el) {
-  el.innerHTML = `<label class="field">Course name<input id="courseName" maxlength="32" value="${esc(s.name)}"></label><button id="saveCourseName">Save name</button><h3>Save and backup</h3><p>Your course and ongoing rounds autosave every 20 seconds and after important changes. Save files can move between devices.</p><p class="note">Last saved: ${s.lastSaved ? new Date(s.lastSaved).toLocaleString() : "Not yet"}. Saves are stored in this browser; export a backup before clearing browser data.</p><div class="row"><button class="primary" id="manualSave">Save now</button><button id="exportSave">Export save</button><button id="importSave">Import save</button></div><input type="file" id="saveFile" accept="application/json,.json" hidden><h3>Controls</h3><p>Watch: drag to pan, pinch to zoom, tap a golfer to follow.<br>Build: draw with one finger. Two fingers or Move tool pan. Pick a brush size; undo and redo refund or charge costs.<br>Play: touch near your ball, pull backward to aim and set power, release to hit. Drag elsewhere to inspect the hole. Change club for a different range.</p><h3>New property</h3><button class="danger" id="newGame">Start a new course</button>`;
+  el.innerHTML = `<label class="field">Course name<input id="courseName" maxlength="32" value="${esc(s.name)}"></label><button id="saveCourseName">Save name</button><h3>Save and backup</h3><p>Your course and ongoing rounds autosave every 20 seconds and after important changes. Save files can move between devices.</p><p class="note">Last saved: ${s.lastSaved ? new Date(s.lastSaved).toLocaleString() : "Not yet"}. Saves are stored in this browser; export a backup before clearing browser data.</p><div class="row"><button class="primary" id="manualSave">Save now</button><button id="exportSave">Export save</button><button id="importSave">Import save</button></div><input type="file" id="saveFile" accept="application/json,.json" hidden><h3>Controls</h3><p>Watch: drag to pan, pinch to zoom, tap a golfer to follow.<br>Build: draw with one finger. Two fingers or Move tool pan. Pick a brush size; undo and redo refund or charge costs.<br>Play: touch near your ball, pull backward to aim and set power, release to hit. Drag elsewhere to inspect the hole. Change club for a different range.</p><h3>Your course collection</h3><div class="row"><button id="savedCourses">Saved courses & account</button><button class="primary" id="newGame">Start a new course</button></div>`;
+  $("savedCourses").onclick = () =>
+    cloud.session ? showAccount() : showCourses();
   $("saveCourseName").onclick = () => {
     s.name = $("courseName").value.trim() || "Wild Links";
     save();
@@ -1341,29 +1578,23 @@ function clubSave(el) {
       let imported = deserialize(await file.text());
       sheet(
         "Load this course?",
-        `<p>Load <b>${esc(imported.name)}</b>, Day ${imported.day}, with ${imported.holes.length} holes and ${money(imported.cash)}? This replaces the current course in this browser.</p><div class="row"><button class="primary" id="loadYes">Load course</button><button id="loadNo">Cancel</button></div>`,
+        `<p>Load <b>${esc(imported.name)}</b>, Day ${imported.day}, with ${imported.holes.length} holes and ${money(imported.cash)}? This adds a separate course to your collection.</p><div class="row"><button class="primary" id="loadYes">Load course</button><button id="loadNo">Cancel</button></div>`,
       );
       $("loadNo").onclick = () => showClub("save");
       $("loadYes").onclick = () => {
-        store.save(imported);
-        location.reload();
+        if (!save()) return;
+        imported.courseId = uid();
+        imported.cloudBase = null;
+        imported.cloudDirty = !!cloud.session;
+        if (!store.save(imported)) return toast("Storage is full.");
+        installCourse(imported);
+        save(true);
       };
     } catch (e) {
       toast(e.message);
     }
   };
-  $("newGame").onclick = () => {
-    sheet(
-      "Start over?",
-      `<p>This replaces your current property. Export your save first if you want to keep it.</p><div class="row"><button class="danger" id="resetYes">Start new property</button><button id="resetNo">Keep my course</button></div>`,
-    );
-    $("resetNo").onclick = () => showClub("save");
-    $("resetYes").onclick = () => {
-      localStorage.removeItem("wild-links-save");
-      localStorage.removeItem("wild-links-backup");
-      location.reload();
-    };
-  };
+  $("newGame").onclick = showNewCourse;
 }
 function showDaily(d) {
   let complaint = Object.entries(d.complaints)
@@ -1400,6 +1631,8 @@ function showDaily(d) {
 // Pointer events unify touch, pen and mouse. Multitouch always controls the camera.
 const canvas = $("course");
 canvas.addEventListener("pointerdown", (e) => {
+  if (cloudConnecting)
+    return toast("Checking cloud saves. Your local course is safe.");
   if (!e.isPrimary && e.pointerType === "mouse") return;
   canvas.setPointerCapture(e.pointerId);
   const p = { x: e.clientX, y: e.clientY };
@@ -1571,7 +1804,7 @@ let previous = performance.now(),
 function loop(now) {
   let dt = Math.min(0.1, (now - previous) / 1000);
   previous = now;
-  if (mode !== "build" && !pending)
+  if (mode !== "build" && !pending && !cloudConnecting)
     sim.tick(dt * (mode === "play" ? Math.min(speed, 1) : speed));
   if (autoFollow && !renderer.follow) {
     let v = sim.visits.find((v) => !v.finished && !v.player);
@@ -1594,6 +1827,16 @@ function loop(now) {
   renderer.draw(dt, sim);
   if (now - lastUI > 500) {
     updateUI();
+    const content = $("clubContent");
+    if (
+      !$("overlay").hidden &&
+      activeTab === "events" &&
+      content &&
+      s.tournament &&
+      eventHash() !== eventLiveHash &&
+      !content.contains(document.activeElement)
+    )
+      clubEvents(content);
     lastUI = now;
   }
   if (now - lastSave > 20000) {
@@ -1615,6 +1858,541 @@ renderTools();
 updateUI();
 requestAnimationFrame(loop);
 save();
+function showTeeSets(i) {
+  const h = s.holes[i];
+  sheet(
+    h.name + " · tee sets",
+    `<p>Standard uses your existing tee. Tap to place optional shorter or longer tees; golfers select tees by ability. Missing tees use Standard.</p>${Object.entries(
+      TEE_NAMES,
+    )
+      .map(
+        ([id, name]) =>
+          `<div class="item"><div><b>${name}</b><p>${h.pin && teeFor(h, id) ? Math.round(dist(teeFor(h, id), h.pin)) + " yd · Par " + teePar(h, id) : "Place a tee and pin"}${id !== "standard" && !h.tees?.[id] ? " · Standard fallback" : ""}</p></div><button data-tee="${id}" ${s.tournament ? "disabled" : ""}>${id === "standard" ? "Move" : "Place / move"}</button></div>`,
+      )
+      .join("")}<h3>Scoring by tees</h3>${
+      Object.entries(h.teeStats || {})
+        .map(
+          ([id, r]) =>
+            `<p>${TEE_NAMES[id]}: ${(r.total / r.n).toFixed(2)} strokes over ${r.n} plays.</p>`,
+        )
+        .join("") || "<p>Played rounds will fill this history.</p>"
+    }`,
+  );
+  $("sheetBody")
+    .querySelectorAll("[data-tee]")
+    .forEach(
+      (b) =>
+        (b.onclick = () => {
+          holeIndex = i;
+          closeSheet();
+          setMode("build");
+          tool = b.dataset.tee === "standard" ? "tee" : "tee:" + b.dataset.tee;
+          toast(
+            "Tap the location for the " + TEE_NAMES[b.dataset.tee] + " tee.",
+          );
+        }),
+    );
+}
+function startObjectEdit(i = holeIndex) {
+  if (s.tournament) return toast("Finish the tournament before redesigning.");
+  holeIndex = i;
+  closeSheet();
+  setMode("build");
+  tool = "object";
+  objectDraft = { stage: "select" };
+  for (const [i, id] of s.facilities.filter((id) => id !== "range").entries())
+    s.facilityPositions[id] ||= {
+      x: 38 + (i % 4) * 42,
+      y: 72 + Math.floor(i / 4) * 38,
+    };
+  toast(
+    "Tap a green, bunker, driving-range tee or facility to move or resize it.",
+  );
+}
+function objectSheet() {
+  const f = objectDraft.feature;
+  if (objectDraft.stage === "confirm") {
+    const plan = objectDraft.plan;
+    sheet(
+      "Confirm course change",
+      `<p>Cost: <b>${money(plan.cost)}</b>. ${f.kind === "terrain" ? "Your shape and its pin move together." : "The facility moves to your chosen location."}</p><div class="row"><button id="confirmFeature" class="primary" ${s.cash < plan.cost ? "disabled" : ""}>Apply · ${money(plan.cost)}</button><button id="cancelFeature">Cancel</button></div>`,
+    );
+    $("confirmFeature").onclick = () => {
+      const t = newTx();
+      applyTransform(s, f, plan, t);
+      objectDraft = null;
+      renderer.editFeature = null;
+      closeSheet();
+      commitTx(t);
+      tool = "hand";
+      renderTools();
+    };
+    $("cancelFeature").onclick = () => {
+      objectDraft = null;
+      renderer.editFeature = null;
+      tool = "hand";
+      closeSheet();
+    };
+    return;
+  }
+  sheet(
+    f.kind === "terrain"
+      ? f.terrain === T.GREEN
+        ? "Edit green"
+        : "Edit bunker"
+      : "Move facility",
+    `<p>Move with one tap on the destination. Resize keeps the same organic outline. Work stays reversible with Undo.</p><div class="row"><button id="moveFeature" class="primary">Move</button><button id="endFeature">Done</button></div>${f.kind === "terrain" ? '<label class="field">Size <span id="sizeLabel">100%</span><input id="featureSize" type="range" min="60" max="160" step="5" value="100"></label><p id="resizeQuote"></p><button id="resizeFeature">Apply new size</button>' : ""}`,
+  );
+  $("moveFeature").onclick = () => {
+    objectDraft.stage = "move";
+    closeSheet();
+    toast("Tap the new center on your land.");
+  };
+  $("endFeature").onclick = () => {
+    objectDraft = null;
+    renderer.editFeature = null;
+    tool = "hand";
+    closeSheet();
+  };
+  if (f.kind === "terrain") {
+    const quote = () => {
+      const scale = +$("featureSize").value / 100;
+      $("sizeLabel").textContent = Math.round(scale * 100) + "%";
+      try {
+        $("resizeQuote").textContent =
+          "Estimated work: " + money(planTransform(s, f, f.center, scale).cost);
+        $("resizeFeature").disabled = false;
+      } catch (e) {
+        $("resizeQuote").textContent = e.message;
+        $("resizeFeature").disabled = true;
+      }
+    };
+    $("featureSize").oninput = quote;
+    quote();
+    $("resizeFeature").onclick = () => {
+      objectDraft.plan = planTransform(
+        s,
+        f,
+        f.center,
+        +$("featureSize").value / 100,
+      );
+      objectDraft.stage = "confirm";
+      objectSheet();
+    };
+  }
+}
+function objectTap(p) {
+  if (lastPoint) return;
+  lastPoint = p;
+  if (objectDraft.stage === "select") {
+    const feature = selectFeature(s, p);
+    if (!feature)
+      return toast("Tap a connected green, bunker, range tee or building.");
+    objectDraft.feature = feature;
+    objectDraft.stage = "selected";
+    renderer.editFeature = feature;
+    objectDraft.show = true;
+  } else if (objectDraft.stage === "move") {
+    try {
+      objectDraft.plan = planTransform(s, objectDraft.feature, p);
+      objectDraft.stage = "confirm";
+      objectDraft.show = true;
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+}
+function showDesignFeedback(i) {
+  const h = s.holes[i],
+    clusters = landingClusters(s, { hole: h.id }),
+    shots = s.trails.filter((t) => t.hole === h.id),
+    bad = clusters
+      .filter((c) => c.penalties)
+      .sort((a, b) => b.penalties - a.penalties)[0],
+    r = revisionFeedback(h);
+  sheet(
+    h.name + " · design feedback",
+    `<p>Based on ${shots.length} recent actual shots and ${h.stats.plays} historical hole plays. Forgiveness and challenge are separate goals.</p><div class="grid"><div class="stat"><strong>${shots.filter((t) => t.penalty).length}</strong><small>Recent penalties</small></div><div class="stat"><strong>${clusters[0]?.n || 0}</strong><small>Shots in busiest landing area</small></div></div><p>${bad ? bad.penalties + " penalties clustered near " + Math.round(bad.x) + ", " + Math.round(bad.y) + " yd. A safer landing area or forward tee could help." : "No recent penalty cluster. Watch different abilities to discover your routes."}</p><table><tr><th>Ability</th><th>Actual score</th><th>Plays</th></tr>${[
+      "Beginners",
+      "Club golfers",
+      "Advanced",
+    ]
+      .map((n, i) => {
+        const b = h.stats.buckets[i];
+        return `<tr><td>${n}</td><td>${b.n ? (b.total / b.n).toFixed(2) : "—"}</td><td>${b.n}</td></tr>`;
+      })
+      .join(
+        "",
+      )}</table><h3>Since the latest redesign</h3><p>Before: ${r.before === null ? "No played baseline" : r.before.toFixed(2)} · After: ${r.after === null ? "Awaiting played holes" : r.after.toFixed(2)} · ${r.plays} new plays</p><div class="row"><button id="showHeat" class="primary">Show landing heatmap</button><button id="feedbackBuild">Redesign</button></div><p class="note">Gold clusters are landings; red clusters contain penalties. Bigger circles mean more visits to that landing area.</p>`,
+  );
+  $("showHeat").onclick = () => {
+    s.heatmap = true;
+    s.showTrails = false;
+    s.feedbackHole = h.id;
+    save();
+    closeSheet();
+    renderer.frame();
+  };
+  $("feedbackBuild").onclick = () => {
+    holeIndex = i;
+    closeSheet();
+    setMode("build");
+  };
+}
+function clubJournal(el) {
+  el.innerHTML = `<p>Your course’s living history: design changes, returning golfers, records, memorable shots and trophies.</p><h3>Trophy cabinet</h3>${(s.trophies || []).map((t) => `<div class="trophy"><span>${iconSVG("trophy")}</span><div><b>${esc(t.name)}</b><p>${esc(t.winner)} · ${t.score} · Day ${t.day}${t.owner ? " · Won by you" : ""}</p></div></div>`).join("") || "<p>Host a tournament to begin your trophy collection.</p>"}<h3>Course journal</h3>${(s.journal || []).map((j) => `<div class="item"><div><small>DAY ${j.day}</small><b>${esc(j.title)}</b><p>${esc(j.text)}</p></div>${j.hole && s.holes.some((h) => h.id === j.hole) ? `<button data-journal-hole="${j.hole}">Inspect</button>` : ""}${j.memberId && s.members[j.memberId] ? `<button data-journal-member="${j.memberId}">Golfer</button>` : ""}</div>`).join("") || "<p>Your first hole opening will begin the story.</p>"}`;
+  el.querySelectorAll("[data-journal-hole]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        showHole(s.holes.findIndex((h) => h.id === b.dataset.journalHole))),
+  );
+  el.querySelectorAll("[data-journal-member]").forEach(
+    (b) => (b.onclick = () => showMember(b.dataset.journalMember)),
+  );
+}
+function showEventResults(t) {
+  sheet(
+    t.name + " · final results",
+    `<div class="winner-banner">${iconSVG("trophy")}<h3>${t.winner ? esc(t.winner.name) : "No completed entries"}</h3><p>${t.winner ? t.winner.score + " (" + relative(t.winner.relative) + ") · " + TEE_NAMES[t.teeSet || "standard"] + " tees" : "All rounds must finish to qualify."}</p></div><p>Hosting & owner awards: <b>${money(t.payout || 0)}</b>. Trophy recorded on Day ${t.ends}.</p><table><tr><th>Place</th><th>Golfer</th><th>Score</th></tr>${(t.leaderboard || []).map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.name)}</td><td>${r.score} (${relative(r.relative)})</td></tr>`).join("")}</table><button id="resultsBack" class="primary">Tournament desk</button>`,
+  );
+  $("resultsBack").onclick = () => showClub("events");
+}
+
+function installCourse(next) {
+  const callbacks = { onDaily: sim.onDaily, onRound: sim.onRound };
+  s = next;
+  sim = Object.assign(new Simulation(s, toast), callbacks);
+  sim.visits = (s.activeVisits || []).filter((v) => !v.finished);
+  sim.playerVisit = sim.visits.find((v) => v.player) || null;
+  if (sim.playerVisit) sim.playerVisit.golfer = s.player;
+  renderer.s = s;
+  renderer.follow = null;
+  renderer.preview = null;
+  renderer.cursor = null;
+  renderer.rangeDraft = null;
+  renderer.editFeature = null;
+  renderer.dirty = true;
+  selected = null;
+  holeIndex = 0;
+  undo = [];
+  redo = [];
+  tx = null;
+  pending = false;
+  lastPoint = null;
+  pointers.clear();
+  gesture = null;
+  swing = null;
+  objectDraft = null;
+  prevPlayerState = null;
+  speed = lastSpeed = 1;
+  $("watchcard").hidden = true;
+  $("watchcard").dataset.golfer = "";
+  closeSheet();
+  setMode(
+    sim.playerVisit ? "play" : s.holes.some((h) => h.open) ? "watch" : "build",
+  );
+  if (sim.playerVisit) {
+    selected = sim.playerVisit.id;
+    renderer.follow = selected;
+  }
+  renderer.frame();
+  updateUI();
+}
+function updateCloudBadge(status) {
+  $("account").textContent = status;
+  $("account").title = cloud.session
+    ? cloud.session.email
+    : "Account and saved courses";
+}
+async function connectCloud() {
+  if (!cloud.session) return;
+  cloud.ready = false;
+  cloudConnecting = true;
+  cloud.setStatus("Connecting");
+  try {
+    const rows = await cloud.list();
+    cloud.bases = Object.fromEntries(rows.map((r) => [r.id, r]));
+    const remote = cloud.bases[s.courseId];
+    if (remote) {
+      if (s.cloudDirty && s.cloudBase !== remote.updateTime) {
+        cloud.blocked.add(s.courseId);
+        cloud.setStatus("Choose save");
+        cloud.ready = true;
+        return;
+      }
+      if (!s.cloudDirty && s.cloudBase !== remote.updateTime) {
+        const loaded = deserialize(await cloud.load(remote));
+        loaded.cloudBase = remote.updateTime;
+        loaded.cloudDirty = false;
+        if (!store.save(loaded))
+          throw Error("Browser storage is full. Export a backup.");
+        installCourse(loaded);
+      }
+    } else if (
+      rows.length &&
+      !s.holes.some((h) => h.tee) &&
+      s.cash === 5000 &&
+      !s.player.xp
+    ) {
+      const r = rows.sort((a, b) => b.updated - a.updated)[0],
+        loaded = deserialize(await cloud.load(r));
+      loaded.cloudBase = r.updateTime;
+      loaded.cloudDirty = false;
+      if (!store.save(loaded)) throw Error("Browser storage is full.");
+      installCourse(loaded);
+    }
+    const career = rows
+      .filter((r) => r.player)
+      .sort((a, b) => b.xp - a.xp)[0]?.player;
+    if (career && career.xp > s.player.xp) {
+      s.player = structuredClone(career);
+      if (sim.playerVisit) sim.playerVisit.golfer = s.player;
+      s.cloudDirty = true;
+      store.save(s);
+    }
+    cloud.ready = true;
+    cloud.lastError = "";
+    cloud.setStatus("Cloud saved");
+    if (s.cloudDirty || !cloud.bases[s.courseId]) {
+      s.cloudDirty = true;
+      store.save(s);
+      cloud.queue(s, serialize(s), true);
+    }
+  } catch (e) {
+    cloud.ready = true;
+    cloud.lastError = e.message;
+    cloud.setStatus(
+      e.code === "PERMISSION_DENIED"
+        ? "Cloud rules needed"
+        : "Offline · local safe",
+    );
+  } finally {
+    cloudConnecting = false;
+  }
+}
+async function accountChanged(user) {
+  s.activeVisits = sim.visits.filter((v) => !v.finished);
+  store.save(s);
+  store = new LocalStore(user?.uid || "guest");
+  installCourse(store.load());
+  if (user) await connectCloud();
+  else cloud.ready = false;
+  showAccount();
+}
+function showAccount() {
+  const user = cloud.session;
+  sheet(
+    user ? "Your courses" : "Welcome to Wild Links",
+    user
+      ? `<p>Signed in as <b>${esc(user.email)}</b></p><p class="note">${esc(cloud.status)}${cloud.lastError ? " · " + esc(cloud.lastError) : ""}</p><div class="row"><button id="refreshCloud">Reconnect & refresh</button><button id="cloudSaveNow">Sync now</button><button id="logout">Sign out</button></div><h3>Your properties</h3><div id="courseSlots"></div><div class="row"><button id="newSlot" class="primary">New course</button><button id="bringGuest">Bring local course</button></div><p class="note">Courses are private to your account. Each has its own business and history. Your owner golfer’s career travels with you.</p>`
+      : `<p>Save your courses across your phone and iPad. Local play remains available offline.</p><form id="accountForm"><label class="field">Email<input id="authEmail" type="email" autocomplete="email" required></label><label class="field">Password<input id="authPassword" type="password" autocomplete="current-password" minlength="6" required></label><label class="field" id="confirmField" hidden>Confirm password<input id="authConfirm" type="password" autocomplete="new-password"></label><p id="authError" class="form-error" role="alert"></p><div class="row"><button id="authSubmit" type="submit" class="primary">Sign in</button><button id="authToggle" type="button">Create account</button><button id="forgotPassword" type="button">Forgot password</button></div></form><div class="row"><button id="guestSlots">Local courses</button><button id="continueLocal">Continue locally</button></div>`,
+  );
+  if (!user) {
+    let registering = false;
+    $("authToggle").onclick = () => {
+      registering = !registering;
+      $("confirmField").hidden = !registering;
+      $("authConfirm").required = registering;
+      $("authSubmit").textContent = registering ? "Create account" : "Sign in";
+      $("authToggle").textContent = registering
+        ? "Already have an account"
+        : "Create account";
+      $("authPassword").autocomplete = registering
+        ? "new-password"
+        : "current-password";
+      $("authError").textContent = "";
+    };
+    $("accountForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const button = $("authSubmit");
+      button.disabled = true;
+      try {
+        await cloud.login(
+          $("authEmail").value,
+          $("authPassword").value,
+          $("authConfirm").value,
+          registering,
+        );
+      } catch (error) {
+        if ($("authError")) $("authError").textContent = error.message;
+      } finally {
+        if (button.isConnected) button.disabled = false;
+      }
+    };
+    $("forgotPassword").onclick = async () => {
+      try {
+        await cloud.resetPassword($("authEmail").value);
+        $("authError").textContent =
+          "If that account exists, check your email for a reset link.";
+      } catch (e) {
+        $("authError").textContent = e.message;
+      }
+    };
+    $("continueLocal").onclick = closeSheet;
+    $("guestSlots").onclick = showCourses;
+    return;
+  }
+  $("refreshCloud").onclick = async () => {
+    await connectCloud();
+    showAccount();
+  };
+  $("cloudSaveNow").onclick = () => {
+    save(true);
+    cloud.flush();
+  };
+  $("logout").onclick = async () => {
+    save();
+    await cloud.signOut();
+  };
+  $("newSlot").onclick = showNewCourse;
+  $("bringGuest").onclick = () => {
+    const guest = new LocalStore().load();
+    sheet(
+      "Bring your local course",
+      `<p>Add ${esc(guest.name)}, Day ${guest.day}, as a separate account course? Your local copy stays available.</p><button id="confirmBring" class="primary">Add to my account</button>`,
+    );
+    $("confirmBring").onclick = () => {
+      guest.courseId = uid();
+      guest.cloudBase = null;
+      guest.cloudDirty = true;
+      if (!store.save(guest)) return toast("Browser storage is full.");
+      installCourse(guest);
+      save(true);
+      showAccount();
+    };
+  };
+  renderCourseSlots($("courseSlots"));
+}
+function renderCourseSlots(el) {
+  const merged = new Map(
+    store.list().map((r) => [r.id, { ...r, local: true }]),
+  );
+  for (const r of Object.values(cloud.bases || {}))
+    merged.set(r.id, { ...r, local: merged.has(r.id) });
+  el.innerHTML = [...merged.values()]
+    .map(
+      (r) =>
+        `<div class="item"><div><b>${esc(r.name)}</b><p>Day ${r.day} · ${r.holes} open holes · ${r.id === s.courseId ? "Current course" : r.local ? "On this device" : "Cloud course"}</p></div><button data-course="${r.id}" ${r.id === s.courseId && !cloud.blocked.has(r.id) ? "disabled" : ""}>${cloud.blocked.has(r.id) ? "Resolve" : "Open"}</button></div>`,
+    )
+    .join("");
+  el.querySelectorAll("[data-course]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        cloud.blocked.has(b.dataset.course)
+          ? showConflict(b.dataset.course)
+          : switchCourse(b.dataset.course)),
+  );
+}
+function showCourses() {
+  sheet(
+    "Your local courses",
+    '<div id="courseSlots"></div><button id="newSlot" class="primary">New course</button>',
+  );
+  renderCourseSlots($("courseSlots"));
+  $("newSlot").onclick = showNewCourse;
+}
+async function switchCourse(id, { remote = false } = {}) {
+  if (tx || pending) return toast("Finish the current construction first.");
+  if (!save()) return;
+  cloudConnecting = true;
+  try {
+    let next = store.get(id),
+      meta = cloud.bases?.[id];
+    if (
+      meta &&
+      (!next ||
+        remote ||
+        (!next.cloudDirty && next.cloudBase !== meta.updateTime))
+    ) {
+      next = deserialize(await cloud.load(meta));
+      next.cloudBase = meta.updateTime;
+      next.cloudDirty = false;
+    }
+    if (!next) throw Error("This course is not available offline yet.");
+    if (next.cloudDirty && meta && next.cloudBase !== meta.updateTime) {
+      cloud.blocked.add(id);
+      showConflict(id);
+      return;
+    }
+    if (
+      !next.activeVisits?.some((v) => v.player) &&
+      s.player.xp > next.player.xp
+    )
+      next.player = structuredClone(s.player);
+    if (!store.save(next)) throw Error("Storage is full.");
+    installCourse(next);
+    toast(next.name + " is open.");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    cloudConnecting = false;
+  }
+}
+function showNewCourse() {
+  sheet(
+    "Start another course",
+    `<p>Your current property will be saved. The new property starts with $5,000 and three hole slots. Your golfer keeps their ability and career.</p><label class="field">Course name<input id="newCourseName" maxlength="32" value="My New Links"></label><div class="row"><button id="resetYes" class="primary">Create course</button><button id="resetNo">Keep playing here</button></div>`,
+  );
+  $("resetNo").onclick = () => showClub("save");
+  $("resetYes").onclick = () => {
+    if (!save()) return;
+    const fresh = initialState();
+    fresh.name = $("newCourseName").value.trim() || "My New Links";
+    fresh.player = structuredClone(s.player);
+    fresh.cloudDirty = !!cloud.session;
+    if (!store.save(fresh))
+      return toast("Could not save the new course. Current property kept.");
+    installCourse(fresh);
+    save(true);
+    toast("New course ready. Your previous property is in saved courses.");
+  };
+}
+function showConflict(id) {
+  const local = store.get(id);
+  sheet(
+    "Two versions of this course",
+    `<p>Another device has saved a different version. Your local course is safe. Keep both to preserve your changes, or open the cloud version.</p><p>Local: ${esc(local?.name || "Course")} · Day ${local?.day || 1}</p><div class="row"><button id="keepBoth" class="primary">Keep both courses</button><button id="useCloud">Open cloud version</button></div>`,
+  );
+  $("keepBoth").onclick = async () => {
+    if (!local) return;
+    const copy = deserialize(serialize(local));
+    copy.courseId = uid();
+    copy.name = (copy.name + " · local copy").slice(0, 32);
+    copy.cloudBase = null;
+    copy.cloudDirty = true;
+    if (!store.save(copy)) return toast("Storage is full.");
+    installCourse(copy);
+    save(true);
+    await cloud.flush();
+    toast("Local version kept as a separate course.");
+  };
+  $("useCloud").onclick = async () => {
+    try {
+      const rows = await cloud.list(),
+        meta = rows.find((r) => r.id === id);
+      if (!meta) throw Error("Cloud course unavailable.");
+      const backup = deserialize(serialize(local));
+      backup.courseId = uid();
+      backup.name = (backup.name + " · backup").slice(0, 32);
+      backup.cloudBase = null;
+      backup.cloudDirty = false;
+      store.save(backup, { activate: false });
+      const next = deserialize(await cloud.load(meta));
+      next.cloudBase = meta.updateTime;
+      next.cloudDirty = false;
+      cloud.pending = null;
+      cloud.blocked.delete(id);
+      cloud.bases[id] = meta;
+      if (!store.save(next)) throw Error("Storage is full.");
+      installCourse(next);
+      cloud.setStatus("Cloud saved");
+      toast("Cloud version opened. Local version retained as a backup.");
+    } catch (e) {
+      toast(e.message);
+    }
+  };
+}
+
 // Read-only inspection plus direct access to the live systems for automated acceptance checks.
 globalThis.WildLinks = {
   get state() {
@@ -1634,6 +2412,12 @@ globalThis.WildLinks = {
   showClub,
   showHole,
   showPlay,
+  showAccount,
+  showCourses,
+  showNewCourse,
+  get cloud() {
+    return cloud;
+  },
   openHole,
   version: VERSION,
 };
@@ -1642,6 +2426,8 @@ if ("serviceWorker" in navigator)
 
 function iconSVG(id) {
   const paths = {
+    trophy:
+      "M7 3h10v7a5 5 0 0 1-10 0ZM7 5H3v3a4 4 0 0 0 4 4M17 5h4v3a4 4 0 0 1-4 4M12 15v5M8 21h8",
     hand: "M12 3v18M3 12h18M8 6l4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4",
     tee: "M7 21V3l12 4-12 4M3 21h9",
     pin: "M9 22V2l11 5-11 4",
@@ -1677,3 +2463,29 @@ for (const id of ["build", "watch", "play", "clubhouse"])
   $(id).querySelector("span").innerHTML = iconSVG(id);
 $("home").innerHTML = iconSVG("home");
 renderTools();
+
+cloud.onSaved = (meta) => {
+  if (!cloud.session) return;
+  if (s.courseId === meta.id) {
+    s.cloudBase = meta.updateTime;
+    s.cloudDirty = cloud.pending?.id === meta.id || cloud.backlog.has(meta.id);
+    store.save(s);
+  } else {
+    const course = store.get(meta.id);
+    if (course) {
+      course.cloudBase = meta.updateTime;
+      course.cloudDirty =
+        cloud.pending?.id === meta.id || cloud.backlog.has(meta.id);
+      store.save(course, { activate: false });
+    }
+  }
+};
+cloud.onConflict = (id) =>
+  toast(
+    "A newer cloud version exists. Tap Choose save to keep both or load it.",
+  );
+addEventListener("online", () => {
+  if (cloud.session) connectCloud().then(() => cloud.flush());
+});
+updateCloudBadge(cloud.status);
+if (cloud.session) connectCloud();

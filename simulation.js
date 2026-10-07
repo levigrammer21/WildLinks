@@ -1,3 +1,4 @@
+import { playedHole, chooseTees, teeFor, addJournal } from "./design.js";
 import {
   clamp,
   dist,
@@ -181,12 +182,18 @@ export class Simulation {
     this.routes.clear();
     this.analyses.clear();
   }
-  startPlayer(holes) {
+  startPlayer(holes, teeSet = "standard") {
     if (this.playerVisit && !this.playerVisit.finished) return this.playerVisit;
-    let v = createVisit(this.s.player, holes, true);
+    let v = createVisit(
+      this.s.player,
+      holes.map((h) => playedHole(h, { teeSet })),
+      true,
+    );
+    v.teeSet = teeSet;
     if (
       this.s.tournament &&
-      holes.map((h) => h.id).join("|") === this.s.tournament.holes.join("|")
+      holes.map((h) => h.id).join("|") === this.s.tournament.holes.join("|") &&
+      teeSet === (this.s.tournament.teeSet || "standard")
     )
       v.eventId = this.s.tournament.id;
     this.visits.push(v);
@@ -203,10 +210,41 @@ export class Simulation {
     const active = new Set(
       this.visits.filter((v) => !v.finished).map((v) => v.memberId),
     );
-    const { profile, member } = chooseVisitor(this.s, active, forced);
-    let v = createVisit(profile, holes);
+    let invited = null;
+    if (this.s.tournament?.schedule && forced === undefined) {
+      invited = this.s.tournament.schedule.find(
+        (e) =>
+          !e.admitted &&
+          (e.day < this.s.day ||
+            (e.day === this.s.day && e.minute <= this.s.minute)) &&
+          !active.has(e.memberId),
+      );
+      if (!invited) return null;
+    }
+    const { profile, member } = chooseVisitor(
+      this.s,
+      active,
+      forced,
+      invited?.memberId,
+    );
+    if (invited) invited.admitted = true;
+    const teeSet = this.s.tournament?.teeSet || chooseTees(profile);
+    let v = createVisit(
+      profile,
+      holes.map((h) => playedHole(h, { teeSet })),
+    );
+    v.teeSet = teeSet;
     v.memberId = member.id;
     v.returning = member.visits > 1;
+    if (v.returning && member.visits % 3 === 2) {
+      this.notify(profile.name + " is back for visit " + member.visits + ".");
+      addJournal(
+        this.s,
+        "A familiar face",
+        profile.name + " returned for visit " + member.visits + ".",
+        { memberId: member.id },
+      );
+    }
     v.eventId = this.s.tournament?.id || null;
     v.thought = v.returning
       ? `Back for visit ${member.visits}. Let's see how the course plays today.`
@@ -270,7 +308,8 @@ export class Simulation {
     }
     for (const v of this.visits) {
       if (v.finished) continue;
-      let h = s.holes.find((x) => x.id === v.holes[v.holeIndex]);
+      let original = s.holes.find((x) => x.id === v.holes[v.holeIndex]);
+      let h = original ? playedHole(original, v) : null;
       if (!h?.pin) {
         v.finished = true;
         continue;
@@ -350,7 +389,10 @@ export class Simulation {
           v.pos.y += ((v.ball.y - v.pos.y) / d) * step;
         }
       } else if (v.state === "between") {
-        const next = s.holes.find((x) => x.id === v.holes[v.holeIndex]);
+        const next = playedHole(
+          s.holes.find((x) => x.id === v.holes[v.holeIndex]),
+          v,
+        );
         let d = dist(v.pos, next.tee);
         if (d < 4) {
           v.pos = { ...next.tee };
@@ -430,7 +472,7 @@ export class Simulation {
       if (v.rangeShots >= 3) {
         v.state = "between";
         const h = s.holes.find((h) => h.id === v.holes[0]);
-        v.ball = { ...h.tee };
+        v.ball = { ...teeFor(h, v.teeSet) };
         v.rangeShot = null;
         v.thought = "Warmed up. Time for the first tee.";
       } else {
@@ -465,6 +507,7 @@ export class Simulation {
     this.s.trails ||= [];
     this.s.trails.push({
       hole: h.id,
+      teeSet: v.teeSet || "standard",
       memberId: v.memberId || (v.player ? "owner" : "visitor-" + v.id),
       name: v.golfer.name,
       skill: v.golfer.skill,
@@ -481,6 +524,20 @@ export class Simulation {
     });
     if (this.s.trails.length > 1200)
       this.s.trails.splice(0, this.s.trails.length - 1200);
+    if (r.holed && r.distance > 20)
+      addJournal(
+        this.s,
+        "A shot to remember",
+        v.golfer.name +
+          " holed a " +
+          Math.round(r.distance) +
+          " yd " +
+          r.club +
+          " on " +
+          h.name +
+          ".",
+        { hole: h.id, memberId: v.memberId || "owner" },
+      );
     v.ball = { ...r.end };
     v.strokes += r.penalty;
     v.penalties += r.penalty;
@@ -553,6 +610,14 @@ export class Simulation {
     let st = h.stats,
       score = v.strokes,
       rel = score - h.par;
+    h.teeStats ||= {};
+    const ts = (h.teeStats[v.teeSet || "standard"] ||= { n: 0, total: 0 });
+    ts.n++;
+    ts.total += score;
+    h.revisionStats ||= {};
+    const rev = (h.revisionStats[h.revision] ||= { n: 0, total: 0 });
+    rev.n++;
+    rev.total += score;
     st.plays++;
     st.total += score;
     let b = v.golfer.skill < 0.35 ? 0 : v.golfer.skill < 0.8 ? 1 : 2;
@@ -571,6 +636,7 @@ export class Simulation {
       hole: h.id,
       name: h.name,
       par: h.par,
+      teeSet: v.teeSet || "standard",
       score,
       putts: v.putts,
       pickup,
@@ -640,7 +706,10 @@ export class Simulation {
         relative: rel,
         holes: v.scores.length,
         day: s.day,
-        layout: v.holes.join(","),
+        layout:
+          v.holes.join(",") +
+          (v.teeSet && v.teeSet !== "standard" ? ":" + v.teeSet : ""),
+        teeSet: v.teeSet || "standard",
         player: v.player,
         memberId: v.memberId || "owner",
         pickup: v.scores.some((h) => h.pickup),
@@ -654,12 +723,31 @@ export class Simulation {
     ) {
       s.recordHistory ||= [];
       s.recordHistory.unshift({ ...rec, category: key });
+      addJournal(
+        s,
+        "Course record",
+        rec.name +
+          " shot " +
+          total +
+          " (" +
+          relative(rel) +
+          ") from " +
+          rec.teeSet +
+          " tees over " +
+          rec.holes +
+          " holes.",
+        { memberId: rec.memberId },
+      );
       s.recordHistory = s.recordHistory.slice(0, 100);
       s.records[key] = rec;
       this.notify(
         `New ${rec.holes}-hole course record: ${rec.name}, ${total} (${relative(rel)}).`,
       );
     }
+    s.recordBook ||= {};
+    const bk = rec.layout;
+    if (!s.recordBook[bk] || rec.relative < s.recordBook[bk].relative)
+      s.recordBook[bk] = { ...rec };
     let personal = v.player ? "personal" : "ai";
     if (
       !s.records[personal] ||
@@ -827,6 +915,7 @@ export class Simulation {
       s.tournament &&
       v.eventId === s.tournament.id &&
       v.holes.join(",") === s.tournament.holes.join(",") &&
+      (v.teeSet || "standard") === (s.tournament.teeSet || "standard") &&
       !rec.pickup
     ) {
       s.tournament.entries.push(rec);
@@ -875,6 +964,14 @@ export class Simulation {
     let area = Math.max(1, s.holes.filter((h) => h.open).length),
       crew = s.staff.grounds * (s.facilities.includes("maintenance") ? 12 : 7);
     s.conditions = clamp(s.conditions + crew - area * 0.6, 10, 100);
+    if (s.tournament && s.day >= s.tournament.ends) {
+      const result = finishTournament(s);
+      this.notify(
+        result.winner
+          ? `${result.name}: ${result.winner.name} wins with ${result.winner.score}.`
+          : `${result.name} ended without a completed competitive round.`,
+      );
+    }
     let summary = {
       day: s.day,
       ...s.daily,
@@ -888,14 +985,7 @@ export class Simulation {
     };
     s.history.unshift(summary);
     s.history = s.history.slice(0, 60);
-    if (s.tournament && s.day >= s.tournament.ends) {
-      const result = finishTournament(s);
-      this.notify(
-        result.winner
-          ? `${result.name}: ${result.winner.name} wins with ${result.winner.score}.`
-          : `${result.name} ended without a completed competitive round.`,
-      );
-    }
+
     s.day++;
     s.minute = 480;
     s.daily = {

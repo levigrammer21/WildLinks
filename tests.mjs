@@ -171,7 +171,7 @@ assert(scratch < beginner, "Skill should improve actual score");
   );
   assert(copy.player.stats.holes === 7);
   assert(copy.activeVisits[0].player);
-  assert(copy.version === 4);
+  assert(copy.version === 5);
   assert(validateHole(copy, copy.holes[0]) === null);
   assert(analyzeHole(copy, copy.holes[0]).length > 100);
 }

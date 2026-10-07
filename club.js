@@ -1,3 +1,4 @@
+import { addJournal } from "./design.js";
 import { clamp, uid, landPlots } from "./world.js";
 import { generateGolfer } from "./golf.js";
 
@@ -132,7 +133,7 @@ export function buyPlot(s, id) {
   s.plots[id] = true;
   return p;
 }
-export function chooseVisitor(s, active, forced) {
+export function chooseVisitor(s, active, forced, invitedId = null) {
   s.members ||= {};
   const event = s.tournament,
     eligible = (g) =>
@@ -144,8 +145,9 @@ export function chooseVisitor(s, active, forced) {
   const available = Object.values(s.members).filter(
     (m) => !active.has(m.id) && eligible(m.profile),
   );
-  let member = null;
+  let member = invitedId ? s.members[invitedId] : null;
   if (
+    !member &&
     forced === undefined &&
     available.length &&
     Math.random() < clamp(0.2 + s.reputation * 0.004, 0.25, 0.7)
@@ -222,8 +224,29 @@ export function rememberRound(s, v, rec, satisfaction) {
     0.08,
     1,
   );
+  const oldBest = m.best;
   if (!m.best || m.best.layout !== rec.layout || rec.relative < m.best.relative)
     m.best = { ...rec };
+  if (
+    m.best === rec ||
+    !oldBest ||
+    (oldBest.layout === rec.layout && rec.relative < oldBest.relative)
+  ) {
+    addJournal(
+      s,
+      "Personal best",
+      v.golfer.name +
+        " recorded " +
+        rec.score +
+        " (" +
+        (rec.relative > 0 ? "+" : "") +
+        rec.relative +
+        ") from " +
+        rec.teeSet +
+        " tees.",
+      { memberId: m.id },
+    );
+  }
   for (const score of v.scores) {
     const h = (m.holeHistory[score.hole] ||= { n: 0, strokes: 0, last: 0 });
     h.n++;
@@ -236,7 +259,7 @@ export const EVENTS = [
   { id: "nine", name: "Nine-hole Invitational", holes: 9, cost: 600 },
   { id: "eighteen", name: "Club Championship", holes: 18, cost: 1200 },
 ];
-export function startTournament(s, eventId, audience) {
+export function startTournament(s, eventId, audience, teeSet = "standard") {
   const e = EVENTS.find((e) => e.id === eventId),
     holes = s.holes.filter((h) => h.open).slice(0, e?.holes || 0);
   if (!e || s.tournament || s.cash < e.cost || holes.length < e.holes)
@@ -245,6 +268,9 @@ export function startTournament(s, eventId, audience) {
   s.daily.expenses += e.cost;
   s.tournament = {
     id: uid(),
+    teeSet,
+    hostBonus: 25,
+    ownerPrize: e.holes === 18 ? 500 : e.holes === 9 ? 250 : 100,
     name: e.name,
     audience: ["open", "beginners", "club", "elite"].includes(audience)
       ? audience
@@ -255,6 +281,55 @@ export function startTournament(s, eventId, audience) {
     entryFee: 22,
     started: s.day,
   };
+  const eligible = (g) =>
+    s.tournament.audience === "open" ||
+    (s.tournament.audience === "beginners" && g.skill < 0.35) ||
+    (s.tournament.audience === "club" && g.skill >= 0.35 && g.skill < 0.8) ||
+    (s.tournament.audience === "elite" && g.skill >= 0.8);
+  const members = Object.values(s.members).filter((m) => eligible(m.profile));
+  while (members.length < 12) {
+    const profile = generateGolfer(
+        s.tournament.audience === "beginners"
+          ? 0.1
+          : s.tournament.audience === "elite"
+            ? 0.99
+            : s.tournament.audience === "club"
+              ? 0.5
+              : undefined,
+      ),
+      id = uid();
+    const member = {
+      id,
+      profile: { ...profile, memberId: id },
+      visits: 0,
+      rounds: 0,
+      satisfaction: 55,
+      loyalty: 0.5,
+      holeHistory: {},
+      warmups: 0,
+    };
+    s.members[id] = member;
+    if (eligible(profile)) members.push(member);
+  }
+  s.tournament.schedule = members.slice(0, 12).map((m, i) => {
+    let minute = Math.max(480, Math.min(s.minute, 980)) + i * 28,
+      day = s.day;
+    if (minute >= 1050) {
+      minute = 480 + (minute - 1050);
+      day++;
+    }
+    return { memberId: m.id, day, minute, admitted: false };
+  });
+  addJournal(
+    s,
+    "Tournament announced",
+    e.name +
+      " invites 12 " +
+      s.tournament.audience +
+      " golfers to the " +
+      teeSet +
+      " tees.",
+  );
   s.opened = true;
   return s.tournament;
 }
@@ -276,7 +351,34 @@ export function finishTournament(s) {
     rec = { ...t, leaderboard: board, winner };
   s.tournamentHistory.unshift(rec);
   s.tournamentHistory = s.tournamentHistory.slice(0, 30);
-  if (winner) s.reputation = clamp(s.reputation + 3, 10, 98);
+  if (winner) {
+    s.reputation = clamp(s.reputation + 3, 10, 98);
+    rec.payout =
+      board.filter((e) => !e.player).length * (t.hostBonus || 0) +
+      (winner.player ? t.ownerPrize || 0 : 0);
+    s.cash += rec.payout;
+    s.daily.revenue += rec.payout;
+    addJournal(
+      s,
+      "Tournament trophy",
+      winner.name +
+        " won " +
+        t.name +
+        " with " +
+        winner.score +
+        ". Hosting and owner prizes: $" +
+        rec.payout +
+        ".",
+    );
+    s.trophies ||= [];
+    s.trophies.unshift({
+      name: t.name,
+      winner: winner.name,
+      score: winner.score,
+      day: s.day,
+      owner: !!winner.player,
+    });
+  }
   s.tournament = null;
   return rec;
 }

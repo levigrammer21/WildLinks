@@ -1,4 +1,4 @@
-export const VERSION = "1.1.0",
+export const VERSION = "1.2.0",
   CELL = 4,
   GW = 600,
   GH = 450;
@@ -55,6 +55,11 @@ export function blankHole(n) {
   return {
     id: uid(),
     name: `Hole ${n}`,
+    tees: {},
+    teePars: {},
+    teeStats: {},
+    revisionStats: {},
+    designBaseline: null,
     tee: null,
     green: null,
     pin: null,
@@ -84,7 +89,11 @@ export function blankHole(n) {
 }
 export function initialState() {
   return {
-    version: 4,
+    version: 5,
+    courseId: uid(),
+    journal: [],
+    facilityPositions: {},
+    heatmap: false,
     name: "Wild Links",
     cash: 5000,
     day: 1,

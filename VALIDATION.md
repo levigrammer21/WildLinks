@@ -1,4 +1,4 @@
-# Wild Links 1.1.0 — validation
+# Wild Links 1.2.0 — validation
 
 Validated on October 7, 2026.
 
@@ -9,7 +9,7 @@ Validated on October 7, 2026.
 - Straight, dogleg, double-dogleg and island-green layouts played by five golfer archetypes, all finishing without pickups.
 - Forty novice and forty scratch rounds: novice average 4.425, scratch average 3.1 on the comparison layout.
 - Concurrent traffic, paid admissions, daily wages, course wear, water penalties and playable drops.
-- Distinct eighteen-hole and nine-hole rounds completed without pickups, recording scores of 63 and 31 in the seeded fixture.
+- Distinct eighteen-hole and nine-hole rounds completed without pickups, recording scores of 61 and 31 in the seeded fixture.
 - Three starter slots; plot purchase adjacency; locked-plot boundaries; land purchases preserving capacity.
 - Course upgrades requiring completed visits, revenue, reputation and a qualifying owner round.
 - Returning visitors retaining identity, with active visitors excluded from repeat admission.
@@ -38,4 +38,24 @@ Test fixtures set eligible business balances/history to exercise later progressi
 
 ## Scope
 
-Stylized 2D golf uses four-yard terrain samples, animated flight height, statistical execution variation, terrain interaction and sampled route decisions. Visitors have tee spacing and three separate practice bays. Facilities use clubhouse locations except the player-placed range. Persistence remains local with manual JSON backup/import; no cloud account is required. Physical mobile devices may render differently from browser touch emulation.
+Stylized 2D golf uses four-yard terrain samples, animated flight height, statistical execution variation, terrain interaction and sampled route decisions. Visitors have tee spacing and three separate practice bays. Facilities start at clubhouse locations and can be relocated with the design tools; the range is placed manually. Guest play uses local persistence; accounts add private cloud course slots. JSON backup/import remains available. Physical mobile devices may render differently from browser touch emulation.
+
+## Earlier reset regression
+
+Real phone-sized touch interactions verified reset cancellation, a failed-storage attempt preserving the current course, fresh cash and three-hole capacity, fresh simulation/renderer state, and reload after a page-exit autosave. Zero JavaScript runtime errors. The complete simulation suite also passed.
+
+## 1.2 acceptance checks
+
+The updated Node suite and Chromium touch acceptance suite passed with zero JavaScript runtime errors.
+
+- Existing save migration and separate per-account local vaults; starting another property preserves previous courses and the owner career.
+- Confirmed registration rejects mismatched passwords before any request. Signup, remembered sessions, token renewal and password-reset requests use Firebase REST API shapes.
+- Full compressed course snapshots round-trip through immutable cloud chunks; multiple courses queue independently. A stale device cannot overwrite the newer head. Offline failures preserve local data.
+- Actual mobile account forms: bring guest course into the account, create a second course, load on another device, resolve conflicting edits by retaining both properties, and sign out without exposing account courses to the guest vault.
+- Forward tee placement, recommended par, missing-tee fallback and tee-aware scoring/records.
+- Resize an organic green to 120%, undo and redo, move it with its pin, undo and redo, and enforce owned-land boundaries and quoted construction expenses.
+- Inspect actual landing clusters, redesign statistics, regulars, staff advice and journal screens; phone/tablet viewport checks and offline reload.
+- Selected Forward tees for an elite event, verified twelve scheduled invitees and automatic leaderboard updates, and opened the final winner/trophy results screen.
+- Rechecked the business interface for 6/9/18-hole upgrades, all four plots, an elite six-hole competitive round, winner history and reload.
+
+Firebase account and cloud tests use an isolated response harness. They verify requests, interface behavior and save conflicts without creating a real account or changing the supplied Firebase project's console settings. The owner must enable Email/Password and publish firestore.rules; a live cross-device check is still needed after that setup. Browser touch emulation does not substitute for testing on every physical phone model.
