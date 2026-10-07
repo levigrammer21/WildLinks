@@ -1,6 +1,6 @@
-# Wild Links — v1.0.0
+# Wild Links — v1.1.0
 
-A mobile-first golf course sandbox and tycoon game. Start with an undeveloped property, $5,000, a check-in hut, and one hole. Paint your own golf architecture, open it to paying visitors, watch their shots, and play the same course yourself.
+A mobile-first golf course sandbox and tycoon game. Start with an undeveloped property, $5,000, a check-in hut, and capacity for three holes. Paint your own golf architecture, open it to paying visitors, watch their shots, and play the same course yourself.
 
 ## Publish on GitHub Pages
 
@@ -18,13 +18,13 @@ There are no compulsory layouts. A fairway stroke preserves existing green terra
 
 ## Touch controls
 
-| Mode | Controls |
-| --- | --- |
-| Build | One finger paints or places the selected object. Brush slider changes diameter in yards. Two fingers pan/pinch; Move also allows one-finger panning. Undo refunds construction cost; redo charges it again. |
-| Watch | Drag to pan, pinch to zoom. Tap a golfer for their card; Follow tracks their ball and shots. Tap a tee or pin to inspect a hole. |
-| Play | Touch near your ball and pull backward. Pull direction aims in the opposite direction; pull length sets power. Release to swing. Drag elsewhere to inspect the course. Club selection is automatic, with a manual override. |
-| Camera | +/− zoom. The crosshair frames the whole property. Aim at pin returns to your shot preview during a personal round. |
-| Time | Tap the speed button for pause, 1×, 2× and 4×. Building pauses play. Personal golf limits time to 1×. |
+| Mode   | Controls                                                                                                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Build  | One finger paints or places the selected object. Brush slider changes diameter in yards. Two fingers pan/pinch; Move also allows one-finger panning. Undo refunds construction cost; redo charges it again.                 |
+| Watch  | Drag to pan, pinch to zoom. Tap a golfer for their card; Follow tracks their ball and shots. Tap a tee or pin to inspect a hole.                                                                                            |
+| Play   | Touch near your ball and pull backward. Pull direction aims in the opposite direction; pull length sets power. Release to swing. Drag elsewhere to inspect the course. Club selection is automatic, with a manual override. |
+| Camera | +/− zoom. The crosshair frames the whole property. Aim at pin returns to your shot preview during a personal round.                                                                                                         |
+| Time   | Tap the speed button for pause, 1×, 2× and 4×. Building pauses play. Personal golf limits time to 1×.                                                                                                                       |
 
 The translucent landing ellipse is **uncertainty**, not an exact destination. The actual shot has contact, direction and distance variation. Driver accuracy, iron control, wedges, bunker play, putting and recovery all matter. The owner starts as a recreational golfer and improves slowly by completing holes.
 
@@ -41,9 +41,15 @@ The translucent landing ellipse is **uncertainty**, not an exact destination. Th
 
 Clubhouse → Operation controls admission, pricing, course care, day reports and tournaments. Revenue arrives at admission; completed rounds provide reputation, feedback and milestone grants. The day runs from 08:00, stops new arrivals at 18:00, and closes after late rounds. Nothing advances while the browser is closed.
 
-Land expansion supports **1 → 3 → 6 → 9 → 18** holes. Purchases require money, reputation and completed visitor rounds. Land adds space; it does not install any prebuilt holes. Manage or add holes from Course routing. Redesigning remains available throughout the game.
+The estate has four plots in a 2×2 layout; you own the northwest to start. Northeast and southwest cost $2,800 each; southeast costs $4,800 and requires an adjoining owned plot. Land purchases add space only. Course goals unlock **3 → 6 → 9 → 18** holes through completed visits, revenue, reputation and a par-or-better owner round. Six holes require 50 visits, $5,000 revenue, reputation 60 and a 3-hole par round; nine require 150 visits, $18,000, reputation 67 and a 6-hole par round; eighteen require 400 visits, $60,000, reputation 75 and a 9-hole par round. Claim upgrades on the goals board. Manage or add holes from Course routing. Redesigning remains available throughout the game.
 
-Facilities add comfort and services. Staff do specific jobs: groundskeepers repair wear, check-in workers shorten admission intervals and operate the shop, mechanics enable faster cart travel, professionals run the range, and service staff operate the café. Facility care and wages are charged daily. Beyond 18 holes, improve reputation, refine your architecture, run club opens and pursue course records.
+Every visitor is remembered, including their abilities, preferences, visits, satisfaction and scoring on each hole. Happy golfers return, and higher reputation brings stronger demand. Clubhouse → Regulars reveals who your architecture suits. The map’s trail button overlays actual recent shots, filtered by ability or the owner. Name holes from Routing → Details.
+
+Build a driving range from Facilities: tap its tee, then its target, and confirm the quoted cost. Visitors sometimes hit three real practice shots before their tee time, paying $3 for practice or $7 with coaching. Three practice bays prevent crowding.
+
+Tournaments require at least 6, 9 or 18 open holes, cost $350 / $600 / $1,200 to host, and run for two operating days. Choose an ability audience, watch the live leaderboard, and earn $22 for each completed competitive round. Each golfer’s best round counts. Event hole designs and pars are locked until the event ends; owner rounds with the same routing also qualify. Winners remain in tournament history.
+
+Facilities add comfort and services. Staff do specific jobs: groundskeepers repair wear, check-in workers shorten admission intervals and operate the shop, mechanics enable faster cart travel, professionals add paid range coaching, and service staff operate the café. Facility care and wages are charged daily. Beyond 18 holes, improve reputation, refine your architecture, run tournaments and pursue course records.
 
 Records include hole scoring, longest drives, longest holed putts, closest approaches, aces, course records, visitor bests, personal bests and a record book. Different available routing configurations have their own current comparison; historical entries remain preserved. Nine- and eighteen-hole records populate when those rounds are played.
 
@@ -57,18 +63,19 @@ A service worker provides an offline fallback after the app has loaded successfu
 
 ## Root-only project structure
 
-| File | Purpose |
-| --- | --- |
-| `index.html`, `style.css` | Responsive game shell and bottom-sheet interface |
-| `app.js` | Touch controls, editor transactions, HUD and management UI |
-| `world.js` | Terrain, brushes, property, hole definitions and architecture analysis |
-| `golf.js` | Golfer generation, club selection, shot AI and shared execution physics |
-| `simulation.js` | Visitors, queues, shot states, economy, records, progression and operating days |
-| `render.js` | Cached Canvas terrain, golfers, trajectory previews and camera |
-| `persistence.js` | Versioned, compressed saves and backup adapter |
-| `sw.js`, `manifest.webmanifest`, `icon.svg` | Offline fallback and app metadata |
-| `tests.mjs`, `package.json` | Dependency-free Node simulation acceptance checks |
-| `.nojekyll` | Direct static hosting marker |
+| File                                        | Purpose                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `index.html`, `style.css`                   | Responsive game shell and bottom-sheet interface                                |
+| `app.js`                                    | Touch controls, editor transactions, HUD and management UI                      |
+| `world.js`                                  | Terrain, brushes, property, hole definitions and architecture analysis          |
+| `golf.js`                                   | Golfer generation, club selection, shot AI and shared execution physics         |
+| `club.js`                                   | Plot purchases, course goals, returning golfers, tournaments and staff status   |
+| `simulation.js`                             | Visitors, queues, shot states, economy, records, progression and operating days |
+| `render.js`                                 | Cached Canvas terrain, golfers, trajectory previews and camera                  |
+| `persistence.js`                            | Versioned, compressed saves and backup adapter                                  |
+| `sw.js`, `manifest.webmanifest`, `icon.svg` | Offline fallback and app metadata                                               |
+| `tests.mjs`, `package.json`                 | Dependency-free Node simulation acceptance checks                               |
+| `.nojekyll`                                 | Direct static hosting marker                                                    |
 
 All project files are at the repository root. No external fonts, images, libraries or runtime requests are needed.
 

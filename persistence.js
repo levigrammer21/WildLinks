@@ -64,7 +64,66 @@ export function deserialize(raw) {
     stats: { ...blankHole(i + 1).stats, ...h.stats },
   }));
   s.recordHistory ||= [];
-  s.version = 3;
+  if (!d.plots) {
+    const sizes = [
+        [600, 440],
+        [940, 700],
+        [1360, 1020],
+        [1840, 1380],
+        [2400, 1800],
+      ],
+      [w, h] = sizes[d.land || 0];
+    s.plotW = Math.max(600, Math.ceil(w / 2));
+    s.plotH = Math.max(440, Math.ceil(h / 2));
+    s.plots =
+      d.land > 0 ? [true, true, true, true] : [true, false, false, false];
+    s.courseLevel =
+      d.capacity >= 18 ? 3 : d.capacity >= 9 ? 2 : d.capacity >= 6 ? 1 : 0;
+  }
+  s.capacity = Math.max(3, s.capacity, s.holes.length);
+  s.members ||= {};
+  s.trails ||= [];
+  s.ownerRounds ||= [];
+  s.upgradeHistory ||= [];
+  s.claimedGoals ||= [];
+  s.tournamentHistory ||= [];
+  s.rangeStats ||= { visits: 0, shots: 0, revenue: 0 };
+  if (!d.ownerRounds) {
+    const old = s.player.stats.best || s.records.personal;
+    if (old && !old.pickup) s.ownerRounds.push({ ...old });
+  }
+  if (s.facilities.includes("range") && !s.range)
+    s.range = {
+      tee: { x: 70, y: 175 },
+      target: { x: 70, y: 385 },
+      legacy: true,
+    };
+  if (s.tournament && !s.tournament.holes) {
+    s.tournamentHistory.unshift({
+      ...s.tournament,
+      legacy: true,
+      winner: null,
+    });
+    s.tournament = null;
+  }
+  for (const v of s.activeVisits || [])
+    if (!v.player) {
+      const id = v.memberId || v.golfer.memberId || v.id;
+      v.memberId = id;
+      v.golfer.memberId = id;
+      if (!s.members[id])
+        s.members[id] = {
+          id,
+          profile: v.golfer,
+          visits: 1,
+          rounds: 0,
+          satisfaction: 55,
+          loyalty: 0.5,
+          holeHistory: {},
+          warmups: 0,
+        };
+    }
+  s.version = 4;
   return s;
 }
 export class LocalStore {

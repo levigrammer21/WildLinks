@@ -1,39 +1,41 @@
-# Wild Links 1.0.0 — validation
+# Wild Links 1.1.0 — validation
 
 Validated on October 7, 2026.
 
-## Simulation checks
+## Simulation
 
-- Straight, dogleg, double-dogleg and island-green courses: beginner, regular, veteran, bomber and scratch golfers all completed their holes through sequential shots.
-- All 20 initial layout/archetype combinations finished without stroke-limit pickups.
-- Across 40 seeded rounds per skill group on the straight fixture, beginners averaged **4.425**, while scratch golfers averaged **3.100**. Execution skill affects actual outcomes.
-- Concurrent admissions served **60 completed rounds** in the traffic fixture. Revenue was earned, maintenance/wages were charged, and day advancement worked.
-- Water produced a penalty and a playable drop.
-- Painted terrain, raised elevation, persistent golfer statistics and an ongoing player visit survived a compressed/versioned save round trip.
-- A scratch visitor played all **18 individually defined holes** and finished without a pickup, setting an **18-hole record of 60**. A separate nine-hole round set a **9-hole record of 28**.
+`npm test` runs reproducible seeded acceptance checks against the actual shared golf engine:
 
-These are reproducible seeded results from `node tests.mjs`, not preassigned game scores.
+- Straight, dogleg, double-dogleg and island-green layouts played by five golfer archetypes, all finishing without pickups.
+- Forty novice and forty scratch rounds: novice average 4.425, scratch average 3.1 on the comparison layout.
+- Concurrent traffic, paid admissions, daily wages, course wear, water penalties and playable drops.
+- Distinct eighteen-hole and nine-hole rounds completed without pickups, recording scores of 63 and 31 in the seeded fixture.
+- Three starter slots; plot purchase adjacency; locked-plot boundaries; land purchases preserving capacity.
+- Course upgrades requiring completed visits, revenue, reputation and a qualifying owner round.
+- Returning visitors retaining identity, with active visitors excluded from repeat admission.
+- Three range shots using shared physics, practice/coaching receipts and zero practice strokes on the course scorecard.
+- Actual shot trails, per-member hole history, persistent practice statistics and save round trips.
+- Six-hole elite tournaments: ability eligibility, fixed routing, qualifying completed entries and winner history.
+- Staff facility prerequisites and active status.
+- v1.0 save migration preserves full-property terrain access, earned eighteen-hole capacity and prior owner records.
 
-## Browser checks
+## Browser
 
-Chromium ran the actual static application over HTTP. Real dispatched touch events exercised the Canvas editor and shot controls.
+Chromium ran the static application over HTTP with real touch events:
 
-- Constructed a custom bending fairway, tee, green, pin, water and sand through the interface.
-- Confirmed construction costs, undo refunds, redo charges, and fairway preservation of existing green terrain.
-- Tested two-finger pinch and camera movement.
-- Opened a hole; a visitor arrived, paid and completed it through the live simulation.
-- Played an owner round using pull-back gestures, including club suggestion, landing uncertainty, animated shots and putting.
-- Reloaded during a shot; restored the ongoing round and its association with the persistent owner golfer. Finished the round and earned personal golf experience/statistics.
-- Earned the first land-purchase prerequisites through completed visits, bought land through the UI, and constructed another distinct hole on it.
-- Exercised the remaining land purchases with eligible test balances/reputation/visit counts, confirming capacities of 6, 9 and 18.
-- Built the pro shop, hired check-in and grounds staff, and confirmed shop income increased paid visitor receipts.
-- Exported a JSON backup, imported it through the file picker and confirmation, and restored the full property capacity.
-- Reloaded successfully with networking disabled after the service worker cache was populated.
-- Checked phone portrait, phone landscape, tablet landscape and tablet portrait at **360×740, 390×844, 844×390, 1024×768 and 768×1024**. Navigation remained inside the viewport with touch-sized buttons and no document overflow.
-- Browser acceptance completed with **zero JavaScript runtime errors**.
+- Painted a bending fairway, tee, green, pin, water and bunker. Checked expenses, undo and redo.
+- Used two-finger pinch and pan. Opened a hole and watched a paid visitor finish.
+- Played an owner round through touch slingshot controls and restored a saved round during flight.
+- Bought adjoining land without increasing capacity, then built a separate dogleg and named it Heron Bend.
+- Placed and confirmed a driving range with touch controls; visitors practiced and finished their rounds.
+- Enabled actual golfer trails, inspected regular profiles, goals, records, events and live staff explanations.
+- Claimed the 6, 9 and 18-hole upgrades through the interface using eligible test histories; bought all four plots while retaining capacity.
+- Hosted an elite six-hole tournament, completed an entry, archived its winner and reloaded its history.
+- Checked 360×740, 390×844, 844×390, 1024×768 and 768×1024 layouts for viewport overflow and touch-sized navigation.
+- Reloaded the application offline after service-worker installation.
 
-## Practical scope
+Test fixtures set eligible business balances/history to exercise later progression without waiting hundreds of live rounds. Competitive entries and golf scores are produced by sequential simulation, not assigned final results.
 
-The game uses stylized 2D golf, sampled terrain, animated flight height and statistical execution errors. It does not model professional aerodynamic ball flight. Terrain samples are four yards; walking between lies is simplified, and tee queues/landing-area clearance provide the pace system. Facilities occupy preset spaces beside check-in, while all golf-hole layouts are freely painted. Browser emulation validates the touch interface; physical device/browser combinations may render slightly differently.
+## Scope
 
-Persistence is local, with JSON backup/import and a replaceable storage adapter. There is no cloud backend without credentials. Offline fallback begins after a successful online load. Progression continues beyond 18 through design refinement, reputation, records and club tournaments.
+Stylized 2D golf uses four-yard terrain samples, animated flight height, statistical execution variation, terrain interaction and sampled route decisions. Visitors have tee spacing and three separate practice bays. Facilities use clubhouse locations except the player-placed range. Persistence remains local with manual JSON backup/import; no cloud account is required. Physical mobile devices may render differently from browser touch emulation.

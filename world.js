@@ -1,4 +1,4 @@
-export const VERSION = "1.0.0",
+export const VERSION = "1.1.0",
   CELL = 4,
   GW = 600,
   GH = 450;
@@ -84,13 +84,27 @@ export function blankHole(n) {
 }
 export function initialState() {
   return {
-    version: 3,
+    version: 4,
     name: "Wild Links",
     cash: 5000,
     day: 1,
     minute: 480,
     land: 0,
-    capacity: 1,
+    capacity: 3,
+    plots: [true, false, false, false],
+    plotW: 600,
+    plotH: 440,
+    courseLevel: 0,
+    members: {},
+    trails: [],
+    showTrails: false,
+    trailFilter: "all",
+    ownerRounds: [],
+    upgradeHistory: [],
+    claimedGoals: [],
+    tournamentHistory: [],
+    rangeStats: { visits: 0, shots: 0, revenue: 0 },
+    range: null,
     fee: 12,
     opened: false,
     reputation: 55,
@@ -163,7 +177,43 @@ export function makeOwner() {
     },
   };
 }
+export function landPlots(s) {
+  const w = s.plotW || 600,
+    h = s.plotH || 440;
+  return ["Northwest", "Northeast", "Southwest", "Southeast"].map(
+    (name, id) => ({
+      id,
+      name,
+      row: Math.floor(id / 2),
+      col: id % 2,
+      x: (id % 2) * w,
+      y: Math.floor(id / 2) * h,
+      w,
+      h,
+      owned: !!s.plots?.[id],
+      cost: id === 3 ? 4800 : 2800,
+    }),
+  );
+}
+export function ownedAt(s, p) {
+  if (p.x < 0 || p.y < 0) return false;
+  if (!s.plots) {
+    const l = landSize(s);
+    return p.x < l.w && p.y < l.h;
+  }
+  return landPlots(s).some(
+    (q) =>
+      q.owned && p.x >= q.x && p.y >= q.y && p.x < q.x + q.w && p.y < q.y + q.h,
+  );
+}
 export function landSize(s) {
+  if (s.plots) {
+    const owned = landPlots(s).filter((p) => p.owned);
+    return {
+      w: Math.max(...owned.map((p) => p.x + p.w)),
+      h: Math.max(...owned.map((p) => p.y + p.h)),
+    };
+  }
   const sizes = [
     [600, 440],
     [940, 700],
@@ -171,7 +221,7 @@ export function landSize(s) {
     [1840, 1380],
     [2400, 1800],
   ];
-  const [w, h] = sizes[s.land];
+  const [w, h] = sizes[s.land || 0];
   return { w, h };
 }
 export function index(x, y) {
@@ -182,9 +232,7 @@ export function index(x, y) {
 }
 export function terrainAt(s, p) {
   const l = landSize(s);
-  return p.x < 0 || p.y < 0 || p.x > l.w || p.y > l.h
-    ? -1
-    : s.terrain[index(p.x, p.y)];
+  return !ownedAt(s, p) ? -1 : s.terrain[index(p.x, p.y)];
 }
 export const heightAt = (s, p) => s.heights[index(p.x, p.y)] || 0;
 export function slopeAt(s, p) {
@@ -226,7 +274,7 @@ export function brushStroke(s, p, r, tool, tx) {
       const cx = x * CELL + 2,
         cy = y * CELL + 2,
         d = Math.hypot(cx - p.x, cy - p.y);
-      if (d > r || cx > l.w || cy > l.h) continue;
+      if (d > r || !ownedAt(s, { x: cx, y: cy })) continue;
       const i = y * GW + x;
       if (tool === "fairway" && s.terrain[i] === T.GREEN) continue;
       let t = s.terrain[i],
@@ -343,6 +391,7 @@ export function routeToPin(s, h) {
       let j = yy * w + xx,
         t = terrainAt(s, { x: xx * step + 10, y: yy * step + 10 }),
         pen = [1.6, 1, 1, 2.5, 25, 3, 1.5, 8, 1.6, 1][t] || 5;
+      if (t < 0) continue;
       let nc = c + Math.hypot(dx, dy) * pen;
       if (nc < cost[j]) {
         cost[j] = nc;
@@ -432,6 +481,8 @@ export function analyzeHole(s, h, knownRoute) {
   };
 }
 export function validateHole(s, h) {
+  if ((h.tee && !ownedAt(s, h.tee)) || (h.pin && !ownedAt(s, h.pin)))
+    return "Purchase that plot before placing a tee or pin there.";
   if (!h.tee) return "Place a tee first.";
   if (!h.green) return "Paint a green first.";
   if (!h.pin) return "Place a pin on the green.";

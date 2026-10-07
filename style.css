@@ -648,3 +648,7 @@ svg {
   pointer-events: auto;
   cursor: pointer;
 }
+progress { accent-color: #e8c879; width: min(100%, 280px); height: 8px; border: 0; border-radius: 8px; overflow: hidden; }
+progress::-webkit-progress-bar { background: #385a50; border-radius: 8px; }
+progress::-webkit-progress-value { background: #e8c879; border-radius: 8px; }
+progress::-moz-progress-bar { background: #e8c879; border-radius: 8px; }

@@ -14,7 +14,9 @@ import {
   decideShot,
   executeShot,
   experienceThought,
+  clubs,
 } from "./golf.js";
+import { chooseVisitor, rememberRound, finishTournament } from "./club.js";
 export const FACILITIES = [
   {
     id: "club",
@@ -38,7 +40,7 @@ export const FACILITIES = [
     cost: 2400,
     upkeep: 16,
     description:
-      "Attract golfers with a place to warm up. A golf professional earns $4 per visit.",
+      "Place a real practice area. Some visitors warm up before their round ($3); a professional adds $4 coaching income.",
   },
   {
     id: "practice",
@@ -96,7 +98,8 @@ export const STAFF = [
     id: "mechanic",
     name: "Maintenance worker",
     wage: 30,
-    description: "Keeps carts and maintenance equipment working.",
+    description:
+      "Enables faster cart travel when a cart barn is built. One worker is enough; groundskeepers handle course repairs.",
   },
   {
     id: "pro",
@@ -111,19 +114,17 @@ export const STAFF = [
     description: "Serves visitors at the halfway café.",
   },
 ];
-export const EXPANSIONS = [
-  { holes: 3, cost: 1600, rep: 50, visits: 5 },
-  { holes: 6, cost: 4800, rep: 52, visits: 25 },
-  { holes: 9, cost: 10500, rep: 56, visits: 70 },
-  { holes: 18, cost: 23000, rep: 60, visits: 150 },
-];
 export function demand(s) {
   let n = s.holes.filter((h) => h.open).length;
   if (!n || !s.opened) return 0;
   const fair = 10 + n * 5 + s.reputation * 0.12 + s.facilities.length * 1.5,
     ratio = s.fee / fair;
   return clamp(
-    (0.65 + s.reputation / 85 + Math.sqrt(n) * 0.25) *
+    (0.5 +
+      s.reputation / 65 +
+      Math.sqrt(n) * 0.25 +
+      (s.facilities.includes("range") ? 0.2 : 0) +
+      (s.tournament ? 0.3 : 0)) *
       (ratio > 1 ? Math.exp(-(ratio - 1) * 1.6) : 1.15),
     0.02,
     4,
@@ -183,26 +184,67 @@ export class Simulation {
   startPlayer(holes) {
     if (this.playerVisit && !this.playerVisit.finished) return this.playerVisit;
     let v = createVisit(this.s.player, holes, true);
+    if (
+      this.s.tournament &&
+      holes.map((h) => h.id).join("|") === this.s.tournament.holes.join("|")
+    )
+      v.eventId = this.s.tournament.id;
     this.visits.push(v);
     this.playerVisit = v;
     return v;
   }
   spawn(forced) {
-    let holes = this.s.holes.filter((h) => h.open);
+    let holes = this.s.tournament
+      ? this.s.tournament.holes
+          .map((id) => this.s.holes.find((h) => h.id === id))
+          .filter(Boolean)
+      : this.s.holes.filter((h) => h.open);
     if (!holes.length) return null;
-    let v = createVisit(generateGolfer(forced), holes);
+    const active = new Set(
+      this.visits.filter((v) => !v.finished).map((v) => v.memberId),
+    );
+    const { profile, member } = chooseVisitor(this.s, active, forced);
+    let v = createVisit(profile, holes);
+    v.memberId = member.id;
+    v.returning = member.visits > 1;
+    v.eventId = this.s.tournament?.id || null;
+    v.thought = v.returning
+      ? `Back for visit ${member.visits}. Let's see how the course plays today.`
+      : v.thought;
+    v.basePatience = v.golfer.patience;
+    if (this.s.facilities.includes("food") && this.s.staff.service)
+      v.golfer.patience = Math.min(1, v.golfer.patience + 0.15);
     this.visits.push(v);
     let income =
       this.s.fee +
       (this.s.facilities.includes("shop") && this.s.staff.desk ? 3 : 0) +
-      (this.s.facilities.includes("food") && this.s.staff.service ? 4 : 0) +
-      (this.s.facilities.includes("range") && this.s.staff.pro ? 4 : 0);
+      (this.s.facilities.includes("food") && this.s.staff.service ? 4 : 0);
     this.s.cash += income;
     this.s.daily.revenue += income;
     this.s.lifetimeRevenue += income;
     v.group = "group-" + Math.floor(this.seq++ / 2);
     v.pos = { x: 38 + (this.seq % 3) * 6, y: 44 };
     v.state = "between";
+    const freeBay = [0, 1, 2].find(
+      (b) =>
+        !this.visits.some(
+          (o) =>
+            o !== v &&
+            !o.finished &&
+            ["goingRange", "rangeThinking", "rangeFlying"].includes(o.state) &&
+            o.rangeBay === b,
+        ),
+    );
+    if (
+      freeBay !== undefined &&
+      this.s.range &&
+      this.s.facilities.includes("range") &&
+      Math.random() < (this.s.staff.pro ? 0.7 : 0.48)
+    ) {
+      v.state = "goingRange";
+      v.rangeShots = 0;
+      v.rangeBay = freeBay;
+    }
     return v;
   }
   tick(dt) {
@@ -221,7 +263,9 @@ export class Simulation {
           Math.min(24, 5 + s.holes.length * 2)
         )
           this.spawn();
-        this.arrival = clamp(38 / demand(s), 9, 350) * (s.staff.desk ? 0.8 : 1);
+        this.arrival =
+          clamp(38 / demand(s), 9, 350) *
+          Math.max(0.55, 1 - s.staff.desk * 0.2);
       }
     }
     for (const v of this.visits) {
@@ -232,12 +276,17 @@ export class Simulation {
         continue;
       }
       v.timer += dt;
+      if (["goingRange", "rangeThinking", "rangeFlying"].includes(v.state)) {
+        this.warmup(v, dt);
+        continue;
+      }
       if (v.state === "waiting") {
         const occupied = this.visits.some(
           (o) =>
             o !== v &&
             !o.finished &&
             o.holes[o.holeIndex] === h.id &&
+            !["goingRange", "rangeThinking", "rangeFlying"].includes(o.state) &&
             (o.state === "flying" ||
               (o.strokes === 0 && o.state !== "waiting") ||
               (dist(o.ball, h.tee) < 45 && o.state !== "waiting")),
@@ -325,6 +374,72 @@ export class Simulation {
     );
     for (const v of this.visits) if (v.finished) v.timer += dt;
   }
+  warmup(v, dt) {
+    const s = this.s,
+      r = s.range;
+    if (!r) {
+      v.state = "between";
+      return;
+    }
+    const tee = { x: r.tee.x + (v.rangeBay || 0) * 6, y: r.tee.y };
+    if (v.state === "goingRange") {
+      const d = dist(v.pos, tee),
+        step = Math.min(d, dt * 32);
+      if (d > 3) {
+        v.pos.x += ((tee.x - v.pos.x) / d) * step;
+        v.pos.y += ((tee.y - v.pos.y) / d) * step;
+        v.thought = "Heading to the range before my tee time.";
+        return;
+      }
+      v.pos = { ...tee };
+      v.ball = { ...tee };
+      v.state = "rangeThinking";
+      v.timer = 0;
+      const income = 3 + (s.staff.pro ? 4 : 0);
+      s.cash += income;
+      s.daily.revenue += income;
+      s.lifetimeRevenue += income;
+      s.rangeStats.revenue += income;
+      s.rangeStats.visits++;
+      if (s.members[v.memberId]) s.members[v.memberId].warmups++;
+    } else if (v.state === "rangeThinking" && v.timer > 1.5) {
+      const club = clubs(v.golfer)[v.rangeShots % 2 === 0 ? 0 : 3],
+        angle = Math.atan2(r.target.y - tee.y, r.target.x - tee.x);
+      v.rangeShot = executeShot(
+        s,
+        v.golfer,
+        tee,
+        r.target,
+        club,
+        Math.min(1, dist(tee, r.target) / club.range),
+        angle,
+      );
+      v.state = "rangeFlying";
+      v.timer = 0;
+      v.thought = s.staff.pro
+        ? "The pro is helping me settle into my swing."
+        : "A few balls to find my rhythm.";
+    } else if (v.state === "rangeFlying" && v.timer >= v.rangeShot.duration) {
+      s.rangeStats.shots++;
+      v.rangeShots++;
+      v.golfer.confidence = clamp(
+        v.golfer.confidence + (s.staff.pro ? 0.04 : 0.02),
+        0.1,
+        0.95,
+      );
+      if (v.rangeShots >= 3) {
+        v.state = "between";
+        const h = s.holes.find((h) => h.id === v.holes[0]);
+        v.ball = { ...h.tee };
+        v.rangeShot = null;
+        v.thought = "Warmed up. Time for the first tee.";
+      } else {
+        v.state = "rangeThinking";
+        v.ball = { ...tee };
+      }
+      v.timer = 0;
+    }
+  }
   hit(v, plan) {
     if (v.state !== "ready" && v.state !== "thinking") return false;
     let h = this.s.holes.find((x) => x.id === v.holes[v.holeIndex]);
@@ -347,6 +462,25 @@ export class Simulation {
   }
   land(v, h) {
     let r = v.shot;
+    this.s.trails ||= [];
+    this.s.trails.push({
+      hole: h.id,
+      memberId: v.memberId || (v.player ? "owner" : "visitor-" + v.id),
+      name: v.golfer.name,
+      skill: v.golfer.skill,
+      day: this.s.day,
+      start: r.start,
+      land: r.land,
+      end: r.end,
+      penalty: r.penalty,
+      kind: r.kind,
+      quality: r.quality,
+      points: r.path
+        .filter((_, i) => i % 4 === 0)
+        .map((p) => ({ x: p.x, y: p.y })),
+    });
+    if (this.s.trails.length > 1200)
+      this.s.trails.splice(0, this.s.trails.length - 1200);
     v.ball = { ...r.end };
     v.strokes += r.penalty;
     v.penalties += r.penalty;
@@ -508,6 +642,8 @@ export class Simulation {
         day: s.day,
         layout: v.holes.join(","),
         player: v.player,
+        memberId: v.memberId || "owner",
+        pickup: v.scores.some((h) => h.pickup),
       };
     let key =
       rec.holes === 18 ? "eighteen" : rec.holes === 9 ? "nine" : "overall";
@@ -533,6 +669,8 @@ export class Simulation {
       s.records[personal] = rec;
     if (v.player) {
       s.player.stats.rounds++;
+      s.ownerRounds.unshift({ ...rec });
+      s.ownerRounds = s.ownerRounds.slice(0, 100);
       if (
         !s.player.stats.best ||
         s.player.stats.best.layout !== rec.layout ||
@@ -683,7 +821,20 @@ export class Simulation {
       s.daily.satisfaction.push(sat);
       s.daily.complaints[complaint] = (s.daily.complaints[complaint] || 0) + 1;
       s.conditions = clamp(s.conditions - 0.16 * v.holes.length, 10, 100);
-      if (s.tournament) s.tournament.entries.push(rec);
+      rememberRound(s, v, rec, Math.round(sat));
+    }
+    if (
+      s.tournament &&
+      v.eventId === s.tournament.id &&
+      v.holes.join(",") === s.tournament.holes.join(",") &&
+      !rec.pickup
+    ) {
+      s.tournament.entries.push(rec);
+      if (!v.player) {
+        s.cash += s.tournament.entryFee;
+        s.daily.revenue += s.tournament.entryFee;
+        s.lifetimeRevenue += s.tournament.entryFee;
+      }
     }
     v.finished = true;
     v.state = "finished";
@@ -738,18 +889,12 @@ export class Simulation {
     s.history.unshift(summary);
     s.history = s.history.slice(0, 60);
     if (s.tournament && s.day >= s.tournament.ends) {
-      let entries = s.tournament.entries.sort(
-          (a, b) => a.relative - b.relative,
-        ),
-        winner = entries[0];
-      if (winner) {
-        s.cash += Math.max(0, entries.length * 22);
-        s.reputation = clamp(s.reputation + 3, 10, 98);
-        this.notify(
-          `${s.tournament.name}: ${winner.name} wins with ${winner.score}. Event receipts $${entries.length * 22}.`,
-        );
-      } else this.notify("Tournament finished without a completed round.");
-      s.tournament = null;
+      const result = finishTournament(s);
+      this.notify(
+        result.winner
+          ? `${result.name}: ${result.winner.name} wins with ${result.winner.score}.`
+          : `${result.name} ended without a completed competitive round.`,
+      );
     }
     s.day++;
     s.minute = 480;
@@ -780,6 +925,11 @@ export class Simulation {
 }
 function recordMax(stats, key, value, v, day) {
   if (!stats[key] || value > stats[key].value)
-    stats[key] = { name: v.golfer.name, value, day };
+    stats[key] = {
+      name: v.golfer.name,
+      memberId: v.memberId || "owner",
+      value,
+      day,
+    };
 }
 export const relative = (x) => (x === 0 ? "E" : x > 0 ? "+" + x : String(x));

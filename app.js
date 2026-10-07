@@ -8,6 +8,8 @@ import {
   uid,
   blankHole,
   landSize,
+  ownedAt,
+  landPlots,
   brushStroke,
   stamp,
   analyzeHole,
@@ -21,11 +23,21 @@ import {
   Simulation,
   FACILITIES,
   STAFF,
-  EXPANSIONS,
   demand,
   dailyCosts,
   relative,
 } from "./simulation.js";
+import {
+  courseGoals,
+  claimUpgrade,
+  buyPlot,
+  SIDE_GOALS,
+  EVENTS,
+  startTournament,
+  eventBoard,
+  golferFit,
+  staffStatus,
+} from "./club.js";
 import { Renderer } from "./render.js";
 const $ = (id) => document.getElementById(id),
   money = (n) => "$" + Math.round(n).toLocaleString(),
@@ -64,7 +76,8 @@ let store = new LocalStore(),
   activeTab = "overview",
   lastUI = 0,
   lastSave = 0,
-  autoFollow = false;
+  autoFollow = false,
+  rangeDraft = null;
 if (s.activeVisits) {
   sim.visits = s.activeVisits.filter((v) => !v.finished);
   for (const v of sim.visits)
@@ -121,7 +134,7 @@ function closeSheet() {
 }
 $("closeSheet").onclick = closeSheet;
 $("overlay").onclick = (e) => {
-  if (e.target === $("overlay")) closeSheet();
+  if (e.target === $("overlay") && !rangeDraft?.target) closeSheet();
 };
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeSheet();
@@ -140,6 +153,8 @@ function setMode(m) {
   mode = m;
   renderer.mode = m;
   renderer.preview = null;
+  rangeDraft = null;
+  renderer.rangeDraft = null;
   if (m === "build") {
     renderer.follow = null;
     selected = null;
@@ -163,6 +178,7 @@ $("watch").onclick = () => {
     );
 };
 $("play").onclick = showPlay;
+$("trails").onclick = showTrails;
 $("clubhouse").onclick = () => showClub("overview");
 $("brand").onclick = () => showClub("overview");
 $("time").onclick = () => {
@@ -206,6 +222,8 @@ function renderTools() {
     .forEach(
       (b) =>
         (b.onclick = () => {
+          rangeDraft = null;
+          renderer.rangeDraft = null;
           tool = b.dataset.tool;
           renderTools();
           updateUI();
@@ -271,7 +289,11 @@ function commitTx(t) {
   return true;
 }
 function finishTx() {
-  if (!tx) return;
+  if (!tx) {
+    lastPoint = null;
+    if (rangeDraft?.target) confirmRangePlacement();
+    return;
+  }
   let t = tx;
   tx = null;
   lastPoint = null;
@@ -298,6 +320,8 @@ function finishTx() {
   } else commitTx(t);
 }
 function undoAction(isRedo) {
+  if (s.tournament)
+    return toast("Finish the tournament before undoing course work.");
   if (tx || pending) return;
   const source = isRedo ? redo : undo,
     dest = isRedo ? undo : redo,
@@ -323,10 +347,63 @@ function undoAction(isRedo) {
   save();
   updateUI();
 }
+function confirmRangePlacement() {
+  const f = FACILITIES.find((f) => f.id === "range");
+  sheet(
+    "Build driving range",
+    `<p>${Math.round(dist(rangeDraft.tee, rangeDraft.target))} yd practice area · ${money(f.cost)} construction · ${money(f.upkeep)} daily care.</p><p>Visitors sometimes hit three practice shots here before their round. Keep its flight corridor away from holes.</p><div class="row"><button id="confirmRange" class="primary">Build range</button><button id="cancelRange">Cancel</button></div>`,
+  );
+  $("confirmRange").onclick = () => {
+    if (s.cash < f.cost) return toast("Not enough money.");
+    s.cash -= f.cost;
+    s.daily.expenses += f.cost;
+    s.facilities.push("range");
+    s.range = { ...rangeDraft };
+    rangeDraft = null;
+    renderer.rangeDraft = null;
+    tool = "tee";
+    save();
+    closeSheet();
+    setMode("watch");
+    toast("Driving range open. Watch visitors warm up.");
+  };
+  $("cancelRange").onclick = () => {
+    rangeDraft = null;
+    renderer.rangeDraft = null;
+    tool = "tee";
+    closeSheet();
+  };
+}
 function paint(p) {
   const h = s.holes[holeIndex],
     l = landSize(s);
-  if (p.x < 0 || p.y < 0 || p.x > l.w || p.y > l.h) return;
+  if (!ownedAt(s, p)) return;
+  if (rangeDraft) {
+    if (lastPoint) return;
+    lastPoint = p;
+    if (tool === "rangeTee") {
+      if (!ownedAt(s, { x: p.x + 12, y: p.y })) {
+        lastPoint = null;
+        return toast("Leave room for three practice bays on your land.");
+      }
+      rangeDraft.tee = { ...p };
+      renderer.rangeDraft = rangeDraft;
+      tool = "rangeTarget";
+      toast("Now tap the range target, at least 80 yards away.");
+    } else {
+      if (dist(rangeDraft.tee, p) < 80) {
+        lastPoint = null;
+        toast("Choose a target at least 80 yards away.");
+        return;
+      }
+      rangeDraft.target = { ...p };
+    }
+    return;
+  }
+  if (s.tournament) {
+    toast("The course is hosting a tournament. Redesign after the event.");
+    return;
+  }
   if (!tx) tx = newTx();
   if (tool === "tee") {
     if (lastPoint) return;
@@ -378,6 +455,8 @@ function paint(p) {
   updateUI();
 }
 function openHole() {
+  if (s.tournament?.holes.includes(s.holes[holeIndex].id))
+    return toast("This hole is reserved for the tournament.");
   let h = s.holes[holeIndex];
   if (h.open) {
     h.open = false;
@@ -405,6 +484,14 @@ function openHole() {
   autoFollow = true;
 }
 function objective() {
+  if (rangeDraft)
+    return (
+      "<b>Place your driving range</b><br>" +
+      (!rangeDraft.tee
+        ? "Tap a tee location."
+        : "Tap a target at least 80 yd away.") +
+      " Select any construction tool to cancel."
+    );
   let h = s.holes[holeIndex];
   if (mode === "build") {
     if (!h.tee)
@@ -492,7 +579,10 @@ function updateWatchCard() {
     rel = v.scores.reduce((a, x) => a + x.score - x.par, 0),
     g = v.golfer;
   const handicap = Math.round((1 - g.skill) * 36);
-  const markup = `<b>${esc(g.name)}</b><small>${esc(g.archetype || "Course owner")} · HCP ${handicap} · ${esc(h.name)}</small><p>Stroke ${v.strokes + 1} · ${Math.round(dist(v.ball, h.pin))} yd to pin · ${relative(rel)}</p><small>${v.state === "flying" ? esc(v.shot.club) + " · " + esc(v.shot.quality) : v.plan ? esc(v.plan.club.name) + " · " + esc(v.plan.reason) : esc(v.mood)}</small><p>“${esc(v.thought)}”</p><small>${g.drive > 260 ? "Long hitter" : g.accuracy > 0.75 ? "Accurate from the tee" : "Finding consistency"} · ${g.putting > 0.7 ? "Confident putter" : g.risk > 0.7 ? "Attacks the risky line" : "Thinks through the next shot"}</small><div class="row"><button id="follow">${renderer.follow === v.id ? "Unfollow" : "Follow golfer"}</button><button id="dismissCard">Close</button></div>`;
+  const atRange = ["goingRange", "rangeThinking", "rangeFlying"].includes(
+    v.state,
+  );
+  const markup = `<b>${esc(g.name)}</b><small>${esc(g.archetype || "Course owner")} · HCP ${handicap} · ${atRange ? "Driving range" : esc(h.name)} · ${v.returning ? "Returning visitor" : "First visit"}</small><p>Stroke ${v.strokes + 1} · ${Math.round(dist(v.ball, h.pin))} yd to pin · ${relative(rel)}</p><small>${v.state === "flying" ? esc(v.shot.club) + " · " + esc(v.shot.quality) : v.plan ? esc(v.plan.club.name) + " · " + esc(v.plan.reason) : esc(v.mood)}</small><p>“${esc(v.thought)}”</p><small>${g.drive > 260 ? "Long hitter" : g.accuracy > 0.75 ? "Accurate from the tee" : "Finding consistency"} · ${g.putting > 0.7 ? "Confident putter" : g.risk > 0.7 ? "Attacks the risky line" : "Thinks through the next shot"}</small><div class="row"><button id="follow">${renderer.follow === v.id ? "Unfollow" : "Follow golfer"}</button><button id="dismissCard">Close</button></div>`;
   const card = $("watchcard");
   if (card.dataset.golfer !== v.id) {
     card.innerHTML =
@@ -785,9 +875,10 @@ function showHole(i) {
     openHole();
     closeSheet();
   };
+  $("parSelect").disabled = !!s.tournament?.holes.includes(h.id);
   $("renameHole").onclick = () => {
     h.name = $("holeName").value.trim() || `Hole ${i + 1}`;
-    h.par = +$("parSelect").value;
+    if (!s.tournament?.holes.includes(h.id)) h.par = +$("parSelect").value;
     h.manualPar = true;
     save();
     showHole(i);
@@ -796,6 +887,9 @@ function showHole(i) {
 const tabs = [
   ["overview", "Operation"],
   ["land", "Land"],
+  ["goals", "Course goals"],
+  ["golfers", "Regulars"],
+  ["events", "Tournaments"],
   ["facilities", "Facilities"],
   ["staff", "Staff"],
   ["records", "Records"],
@@ -815,6 +909,9 @@ function showClub(tab = "overview") {
   const content = $("clubContent");
   if (tab === "overview") clubOverview(content);
   if (tab === "land") clubLand(content);
+  if (tab === "goals") clubGoals(content);
+  if (tab === "golfers") clubGolfers(content);
+  if (tab === "events") clubEvents(content);
   if (tab === "facilities") clubFacilities(content);
   if (tab === "staff") clubStaff(content);
   if (tab === "records") clubRecords(content);
@@ -825,7 +922,7 @@ function showClub(tab = "overview") {
 function clubOverview(el) {
   let n = s.holes.filter((h) => h.open).length,
     active = sim.visits.filter((v) => !v.finished && !v.player).length;
-  el.innerHTML = `<div class="grid"><div class="stat"><strong>${money(s.daily.revenue)}</strong><small>Today’s receipts</small></div><div class="stat"><strong>${s.daily.served}</strong><small>Completed rounds today</small></div><div class="stat"><strong>${Math.round(s.reputation)} / 100</strong><small>Reputation</small></div><div class="stat"><strong>${Math.round(s.conditions)}%</strong><small>Course conditions</small></div></div><h3>Green fee</h3><p>A ${n}-hole visit currently costs ${money(s.fee)}. ${active} golfers on the property. ${demand(s) > 1.8 ? "Demand is strong." : demand(s) > 0.7 ? "Demand is steady." : "Demand is light."}</p><label class="field">Fee per round<input id="feeInput" type="number" inputmode="numeric" min="0" max="250" value="${s.fee}"></label><div class="row"><button class="primary" id="setFee">Set fee</button><button id="businessToggle">${s.opened ? "Close admissions" : "Open admissions"}</button><button id="routing">Course routing</button></div><h3>Operating day</h3><p>08:00–18:00 arrivals; the property closes after the last round. ${s.weather.name}. Daily care, facilities and wages: <b>${money(dailyCosts(s))}</b>.</p><div class="row"><button id="nextDay">Finish day</button><button id="dailyReport" ${s.history.length ? "" : "disabled"}>Last daily report</button><button id="care">Restore conditions · $180</button></div><h3>Club events</h3><p>${s.tournament ? esc(s.tournament.name) + " is running until Day " + s.tournament.ends + "." : n >= 3 ? "Host a two-day open. Visitors compete on your current layout. Event receipts depend on completed rounds." : "Open three holes to host a club tournament."}</p><button id="tournament" ${n < 3 || s.tournament || s.cash < 350 ? "disabled" : ""}>Host a club open · $350</button>`;
+  el.innerHTML = `<div class="grid"><div class="stat"><strong>${money(s.daily.revenue)}</strong><small>Today’s receipts</small></div><div class="stat"><strong>${s.daily.served}</strong><small>Completed rounds today</small></div><div class="stat"><strong>${Math.round(s.reputation)} / 100</strong><small>Reputation</small></div><div class="stat"><strong>${Math.round(s.conditions)}%</strong><small>Course conditions</small></div></div><h3>Green fee</h3><p>A ${n}-hole visit currently costs ${money(s.fee)}. ${active} golfers on the property. ${demand(s) > 1.8 ? "Demand is strong." : demand(s) > 0.7 ? "Demand is steady." : "Demand is light."}</p><label class="field">Fee per round<input id="feeInput" type="number" inputmode="numeric" min="0" max="250" value="${s.fee}"></label><div class="row"><button class="primary" id="setFee">Set fee</button><button id="businessToggle">${s.opened ? "Close admissions" : "Open admissions"}</button><button id="routing">Course routing</button></div><h3>Operating day</h3><p>08:00–18:00 arrivals; the property closes after the last round. ${s.weather.name}. Daily care, facilities and wages: <b>${money(dailyCosts(s))}</b>.</p><div class="row"><button id="nextDay">Finish day</button><button id="dailyReport" ${s.history.length ? "" : "disabled"}>Last daily report</button><button id="care">Restore conditions · $180</button></div><h3>Club events</h3><p>${s.tournament ? esc(s.tournament.name) + " is running until Day " + s.tournament.ends + "." : n >= 6 ? "Host a two-day open. Visitors compete on your current layout. Event receipts depend on completed rounds." : "Open at least six holes to host a club tournament."}</p><button id="tournament" ${n < 3 || s.tournament || s.cash < 350 ? "disabled" : ""}>Host a club open · $350</button>`;
   $("setFee").onclick = () => {
     s.fee = clamp(+$("feeInput").value || 0, 0, 250);
     save();
@@ -863,36 +960,169 @@ function clubOverview(el) {
     save();
     showClub("overview");
   };
-  $("tournament").onclick = () => {
-    s.cash -= 350;
-    s.daily.expenses += 350;
-    s.tournament = { name: `${s.name} Open`, ends: s.day + 1, entries: [] };
-    sim.arrival = 1;
-    s.opened = true;
-    save();
-    showClub("overview");
-    toast("The club open is underway. Keep your course welcoming.");
-  };
+  $("tournament").disabled = false;
+  $("tournament").textContent = "Tournament desk";
+  $("tournament").onclick = () => showClub("events");
 }
 function clubLand(el) {
-  let e = EXPANSIONS[s.land],
-    l = landSize(s);
-  el.innerHTML = `<div class="grid"><div class="stat"><strong>${s.capacity}</strong><small>Hole capacity</small></div><div class="stat"><strong>${l.w} × ${l.h}</strong><small>Property size in yards</small></div></div><p>Your holes can be reshaped, renamed, closed, or rebuilt at any time. Expansion adds adjoining land and increases hole capacity.</p>${e ? `<h3>Expand to ${e.holes} holes</h3><p>Cost: <b>${money(e.cost)}</b><br>Reputation: ${Math.round(s.reputation)} / ${e.rep} required<br>Completed visitor rounds: ${s.totalServed} / ${e.visits} required</p><button class="primary" id="buyLand" ${s.cash < e.cost || s.reputation < e.rep || s.totalServed < e.visits ? "disabled" : ""}>Purchase adjoining land</button>` : "<h3>The full estate</h3><p>You can now build 18 holes. Refine the architecture, chase records and host tournaments.</p>"}<h3>Course routing</h3><button id="landRouting">Manage holes</button><p class="note">Progression: 1 → 3 → 6 → 9 → 18 holes. Land is permanent; hole designs remain flexible.</p>`;
-  if (e)
-    $("buyLand").onclick = () => {
-      if (s.cash < e.cost || s.reputation < e.rep || s.totalServed < e.visits)
-        return;
-      s.cash -= e.cost;
-      s.daily.expenses += e.cost;
-      s.land++;
-      s.capacity = e.holes;
-      renderer.dirty = true;
-      renderer.frame();
-      save();
-      showClub("land");
-      toast(`New land acquired. You can build ${e.holes} holes.`);
-    };
+  el.innerHTML = `<p>Four adjoining plots make up your estate. Land adds space; course goals unlock holes. You start in the northwest with room for three holes.</p><div class="grid">${landPlots(
+    s,
+  )
+    .map(
+      (p) =>
+        `<div class="stat"><strong>${p.name}</strong><small>${p.w} × ${p.h} yd · ${p.owned ? "Owned" : money(p.cost)}</small><button data-plot="${p.id}" ${p.owned ? "disabled" : ""}>${p.owned ? "Your land" : "Buy plot"}</button></div>`,
+    )
+    .join(
+      "",
+    )}</div><p>Current hole capacity: <b>${s.capacity}</b>. Designs remain editable.</p><div class="row"><button id="landGoals">Course goals</button><button id="landRouting">Manage & name holes</button></div>`;
+  el.querySelectorAll("[data-plot]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const result = buyPlot(s, +b.dataset.plot);
+        if (!result)
+          return toast("Buy an adjoining plot first, and check your budget.");
+        renderer.dirty = true;
+        renderer.frame();
+        sim.invalidate();
+        save();
+        showClub("land");
+        toast(
+          result.name + " acquired. Hole capacity stays " + s.capacity + ".",
+        );
+      }),
+  );
+  $("landGoals").onclick = () => showClub("goals");
   $("landRouting").onclick = showHoleList;
+}
+function clubGoals(el) {
+  const g = courseGoals(s);
+  el.innerHTML = `<h3>${g ? g.upgrade.name : "Destination course achieved"}</h3><p>${g ? "Earn capacity for " + g.upgrade.capacity + " holes and " + money(g.upgrade.reward) + " by growing your club and playing your own course." : "Your 18-hole estate is ready for a lasting golfing history."}</p>${g ? g.checks.map((c) => `<div class="item"><div><b>${c.name}</b><p>${c.money ? money(c.value) : c.value} / ${c.money ? money(c.target) : c.target}</p><progress value="${Math.min(c.value, c.target)}" max="${c.target}"></progress></div></div>`).join("") + `<button id="claimUpgrade" class="primary" ${g.ready ? "" : "disabled"}>Upgrade course · ${g.upgrade.capacity} holes</button>` : ""}<h3>Club challenges</h3>${SIDE_GOALS.map((c) => `<div class="item"><div><b>${c.name}</b><p>${c.text} ${Math.min(c.value(s), c.target)} / ${c.target}</p><small>Reward ${money(c.reward)}</small></div><button data-goal="${c.id}" ${s.claimedGoals.includes(c.id) || c.value(s) < c.target ? "disabled" : ""}>${s.claimedGoals.includes(c.id) ? "Claimed" : "Claim"}</button></div>`).join("")}`;
+  if (g)
+    $("claimUpgrade").onclick = () => {
+      const u = claimUpgrade(s);
+      if (u) {
+        save();
+        showClub("goals");
+        toast(u.name + "! Capacity is now " + s.capacity + " holes.");
+      }
+    };
+  el.querySelectorAll("[data-goal]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const c = SIDE_GOALS.find((c) => c.id === b.dataset.goal);
+        if (!s.claimedGoals.includes(c.id) && c.value(s) >= c.target) {
+          s.claimedGoals.push(c.id);
+          s.cash += c.reward;
+          save();
+          showClub("goals");
+        }
+      }),
+  );
+}
+function clubGolfers(el) {
+  const members = Object.values(s.members).sort((a, b) => b.visits - a.visits);
+  el.innerHTML = `<p>${members.length} remembered golfers · ${members.filter((m) => m.visits > 1).length} returning visitors. Happy regulars return more often; reputation attracts new faces.</p><label class="field">Show golfers<select id="memberFilter"><option value="all">Everyone</option><option value="returning">Returning visitors</option><option value="beginner">Beginners</option><option value="expert">Advanced golfers</option></select></label><div id="memberList"></div>`;
+  const list = () => {
+    $("memberList").innerHTML =
+      members
+        .filter((m) => {
+          const f = $("memberFilter").value;
+          return (
+            f === "all" ||
+            (f === "returning" && m.visits > 1) ||
+            (f === "beginner" && m.profile.skill < 0.35) ||
+            (f === "expert" && m.profile.skill > 0.78)
+          );
+        })
+        .map(
+          (m) =>
+            `<div class="item"><div><b>${esc(m.profile.name)}</b><p>${esc(m.profile.archetype)} · ${m.visits} visits · satisfaction ${Math.round(m.satisfaction)}%</p></div><button data-member="${m.id}">Profile</button></div>`,
+        )
+        .join("") || "<p>Your first visitors will appear here.</p>";
+    $("memberList")
+      .querySelectorAll("[data-member]")
+      .forEach((b) => (b.onclick = () => showMember(b.dataset.member)));
+  };
+  $("memberFilter").onchange = list;
+  list();
+}
+function showMember(id) {
+  const m = s.members[id];
+  if (!m) return;
+  const v = sim.visits.find((v) => v.memberId === id && !v.finished);
+  sheet(
+    m.profile.name,
+    `<p>${esc(m.profile.archetype)} · HCP ${Math.round((1 - m.profile.skill) * 36)} · ${m.visits} visits · ${m.rounds} completed rounds</p><p>${esc(golferFit(s, m))}</p><p>Best round: ${m.best ? m.best.score + " (" + relative(m.best.relative) + ") over " + m.best.holes + " holes" : "Not yet recorded"} · ${m.warmups} range sessions</p><table><tr><th>Hole</th><th>Average</th><th>Plays</th></tr>${s.holes
+      .map((h) => {
+        const r = m.holeHistory[h.id];
+        return `<tr><td>${esc(h.name)}</td><td>${r ? (r.strokes / r.n).toFixed(2) : "—"}</td><td>${r?.n || 0}</td></tr>`;
+      })
+      .join(
+        "",
+      )}</table><div class="row">${v ? '<button id="memberFollow" class="primary">Follow this visit</button>' : ""}<button id="backMembers">Back to regulars</button></div>`,
+  );
+  $("backMembers").onclick = () => showClub("golfers");
+  if (v)
+    $("memberFollow").onclick = () => {
+      closeSheet();
+      setMode("watch");
+      selected = v.id;
+      renderer.follow = v.id;
+      updateUI();
+    };
+}
+function clubEvents(el) {
+  const n = s.holes.filter((h) => h.open).length,
+    t = s.tournament;
+  el.innerHTML = `<p>Tournaments run for two operating days on a fixed 6, 9 or 18-hole routing. Only completed event rounds qualify; each golfer’s best score counts. Entry receipts are earned when a round finishes.</p>${
+    t
+      ? `<h3>${esc(t.name)} · ${esc(t.audience)}</h3><p>Ends after Day ${t.ends}. Event holes cannot be redesigned until it ends.</p><table><tr><th>Golfer</th><th>Score</th></tr>${eventBoard(
+          s,
+        )
+          .map(
+            (e) =>
+              `<tr><td>${esc(e.name)}</td><td>${e.score} (${relative(e.relative)})</td></tr>`,
+          )
+          .join("")}</table>`
+      : `<label class="field">Invite golfers<select id="eventAudience"><option value="open">All abilities</option><option value="beginners">Beginners</option><option value="club">Club golfers</option><option value="elite">Elite golfers</option></select></label>${EVENTS.map((e) => `<div class="item"><div><b>${e.name}</b><p>${e.holes} open holes required · ${money(e.cost)} hosting · $22 per completed entry</p></div><button data-event="${e.id}" ${n < e.holes || s.cash < e.cost ? "disabled" : ""}>Host</button></div>`).join("")}`
+  }<h3>Tournament history</h3>${s.tournamentHistory.map((e) => `<div class="item"><div><b>${esc(e.name)}</b><p>${e.winner ? esc(e.winner.name) + " · " + e.winner.score + " (" + relative(e.winner.relative) + ")" : "No completed entries"} · Day ${e.ends}</p></div></div>`).join("") || "<p>Your first tournament will become part of the club’s history.</p>"}`;
+  el.querySelectorAll("[data-event]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        if (startTournament(s, b.dataset.event, $("eventAudience").value)) {
+          sim.arrival = 1;
+          save();
+          showClub("events");
+          toast("Tournament underway. Returning golfers compete by name.");
+        }
+      }),
+  );
+}
+function showTrails() {
+  sheet(
+    "Golfer trails",
+    `<p>Actual shot paths and landing spots reveal how golfers use your design. Red marks show penalties; gold marks show safe landings. The most recent 1,200 shots are remembered.</p><label class="field">Trail overlay<select id="trailSelect">${[
+      ["off", "Hidden"],
+      ["all", "All golfers"],
+      ["beginner", "Beginners"],
+      ["club", "Club golfers"],
+      ["scratch", "Advanced golfers"],
+      ["owner", "Your shots"],
+    ]
+      .map(
+        ([v, n]) =>
+          `<option value="${v}" ${(!s.showTrails ? v === "off" : s.trailFilter === v) ? "selected" : ""}>${n}</option>`,
+      )
+      .join(
+        "",
+      )}</select></label><button id="applyTrails" class="primary">Apply overlay</button>`,
+  );
+  $("applyTrails").onclick = () => {
+    s.showTrails = $("trailSelect").value !== "off";
+    s.trailFilter = $("trailSelect").value;
+    save();
+    closeSheet();
+  };
 }
 function clubFacilities(el) {
   el.innerHTML =
@@ -906,6 +1136,18 @@ function clubFacilities(el) {
       (b.onclick = () => {
         let f = FACILITIES.find((f) => f.id === b.dataset.fac);
         if (s.cash < f.cost || s.facilities.includes(f.id)) return;
+        if (f.id === "range") {
+          closeSheet();
+          setMode("build");
+          rangeDraft = {};
+          tool = "rangeTee";
+          toast(
+            "Range: tap a tee location, then a target at least 80 yards away. Cost " +
+              money(f.cost) +
+              " on confirmation.",
+          );
+          return;
+        }
         sheet(
           "Build " + f.name,
           `<p>${f.description}</p><p>${money(f.cost)} now; ${money(f.upkeep)} in daily care.</p><div class="row"><button class="primary" id="facilityYes">Build facility</button><button id="facilityNo">Cancel</button></div>`,
@@ -927,7 +1169,7 @@ function clubStaff(el) {
     `<p>Staff have practical jobs. Wages are charged when the day ends. Current wages: ${money(STAFF.reduce((a, f) => a + s.staff[f.id] * f.wage, 0))} per day.</p>` +
     STAFF.map(
       (f) =>
-        `<div class="item"><div><b>${f.name} · ${s.staff[f.id]}</b><p>${f.description}</p><small>${money(f.wage)} per day each</small></div><button data-fire="${f.id}" ${s.staff[f.id] ? "" : "disabled"} aria-label="Release ${f.name}">−</button><button data-hire="${f.id}" ${s.staff[f.id] >= 12 ? "disabled" : ""} aria-label="Hire ${f.name}">+</button></div>`,
+        `<div class="item"><div><b>${f.name} · ${s.staff[f.id]}</b><p>${staffStatus(s, f.id).status}</p><p class="note">${staffStatus(s, f.id).tip}</p><small>${staffStatus(s, f.id).active ? "Working" : "Inactive"} · ${money(f.wage)} per day each</small></div><button data-fire="${f.id}" ${s.staff[f.id] ? "" : "disabled"} aria-label="Release ${f.name}">−</button><button data-hire="${f.id}" ${s.staff[f.id] >= ({ desk: 3, mechanic: 1, pro: 1, service: 1 }[f.id] || 12) ? "disabled" : ""} aria-label="Hire ${f.name}">+</button></div>`,
     ).join("");
   el.querySelectorAll("[data-hire]").forEach(
     (b) =>
@@ -1221,7 +1463,8 @@ canvas.addEventListener("pointermove", (e) => {
     return;
   }
   if (!gesture || gesture.kind === "pinch") return;
-  if (dist(p, gesture.start) > 5) gesture.moved = true;
+  if (dist(p, gesture.start) > (gesture.kind === "swing" ? 3 : 5))
+    gesture.moved = true;
   if (gesture.kind === "paint") paint(renderer.world(p));
   else if (gesture.kind === "swing" && swing) {
     const dx = swing.origin.x - p.x,
@@ -1259,7 +1502,7 @@ function release(e, cancel = false) {
       lastPoint = null;
     } else finishTx();
   } else if (g.kind === "swing" && swing) {
-    if (!cancel && swing.power > 0.035 && g.moved) {
+    if (!cancel && swing.power > 0.025 && g.moved) {
       const v = sim.playerVisit;
       sim.hit(v, {
         club: clubs(v.golfer)[clubIndex],

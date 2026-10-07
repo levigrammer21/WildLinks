@@ -16,7 +16,7 @@ import {
   executeShot,
   clubs,
 } from "./golf.js";
-import { Simulation, dailyCosts, EXPANSIONS } from "./simulation.js";
+import { Simulation, dailyCosts } from "./simulation.js";
 import { serialize, deserialize } from "./persistence.js";
 let seed = 8210;
 Math.random = () => {
@@ -171,14 +171,10 @@ assert(scratch < beginner, "Skill should improve actual score");
   );
   assert(copy.player.stats.holes === 7);
   assert(copy.activeVisits[0].player);
-  assert(copy.version === 3);
+  assert(copy.version === 4);
   assert(validateHole(copy, copy.holes[0]) === null);
   assert(analyzeHole(copy, copy.holes[0]).length > 100);
 }
-assert.deepEqual(
-  EXPANSIONS.map((x) => x.holes),
-  [3, 6, 9, 18],
-);
 console.log("Course outcomes:", JSON.stringify(totals, null, 2));
 console.log("Ability averages:", {
   beginner: beginner / 40,
@@ -189,6 +185,9 @@ console.log("Ability averages:", {
 {
   const s = initialState();
   s.land = 4;
+  s.plots = [true, true, true, true];
+  s.plotW = 1200;
+  s.plotH = 900;
   s.capacity = 18;
   s.holes = [];
   s.opened = false;
@@ -229,3 +228,109 @@ console.log("Ability averages:", {
 }
 
 console.log("All simulation acceptance checks passed.");
+// Club progression, independently owned land, recurring identities and real practice.
+{
+  const {
+    courseGoals,
+    claimUpgrade,
+    buyPlot,
+    chooseVisitor,
+    startTournament,
+    eventBoard,
+    finishTournament,
+    staffStatus,
+  } = await import("./club.js");
+  const { ownedAt } = await import("./world.js");
+  const s = initialState();
+  assert.equal(s.capacity, 3);
+  assert.deepEqual(s.plots, [true, false, false, false]);
+  s.cash = 20000;
+  assert.equal(buyPlot(s, 3), false);
+  assert(buyPlot(s, 1));
+  assert.equal(s.capacity, 3);
+  assert(ownedAt(s, { x: 900, y: 200 }));
+  assert(!ownedAt(s, { x: 200, y: 700 }));
+  assert.equal(terrainAt(s, { x: 200, y: 700 }), -1);
+  s.totalServed = 50;
+  s.lifetimeRevenue = 5000;
+  s.reputation = 60;
+  assert(!courseGoals(s).ready);
+  s.ownerRounds = [{ holes: 3, relative: 0, pickup: false }];
+  assert(claimUpgrade(s));
+  assert.equal(s.capacity, 6);
+  assert.equal(claimUpgrade(s), false);
+  const first = chooseVisitor(s, new Set(), 0.99);
+  first.member.satisfaction = 90;
+  const oldRandom = Math.random;
+  Math.random = () => 0.1;
+  const returned = chooseVisitor(s, new Set());
+  assert.equal(returned.member.id, first.member.id);
+  const different = chooseVisitor(s, new Set([first.member.id]));
+  assert.notEqual(different.member.id, first.member.id);
+  Math.random = oldRandom;
+  assert(!startTournament(s, "six", "elite"));
+  const base = course("straight");
+  base.s.cash = 10000;
+  base.s.capacity = 6;
+  base.s.holes = Array.from({ length: 6 }, (_, i) => ({
+    ...structuredClone(base.h),
+    id: "event-hole-" + i,
+    name: "Hole " + (i + 1),
+  }));
+  assert(startTournament(base.s, "six", "elite"));
+  const sim = new Simulation(base.s);
+  let entry = sim.spawn();
+  assert(entry.golfer.skill >= 0.78);
+  assert.equal(entry.holes.length, 6);
+  assert.equal(entry.eventId, base.s.tournament.id);
+  base.s.opened = false;
+  for (let i = 0; i < 16000 && !entry.finished; i++) sim.tick(0.25);
+  assert(entry.finished);
+  assert.equal(eventBoard(base.s).length, 1);
+  assert.equal(base.s.tournament.entries.length, 1);
+  assert(finishTournament(base.s).winner);
+  assert.equal(base.s.tournamentHistory.length, 1);
+  assert.equal(staffStatus(s, "mechanic").active, false);
+  s.staff.mechanic = 1;
+  s.facilities.push("carts");
+  assert(staffStatus(s, "mechanic").active);
+  const practice = course("straight");
+  practice.s.opened = false;
+  practice.s.range = { tee: { x: 70, y: 120 }, target: { x: 70, y: 340 } };
+  practice.s.facilities.push("range");
+  practice.s.staff.pro = 1;
+  const psim = new Simulation(practice.s),
+    v = psim.spawn(0.6);
+  v.state = "goingRange";
+  v.rangeShots = 0;
+  v.rangeBay = 0;
+  for (let i = 0; i < 500 && v.rangeShots < 3; i++) psim.tick(0.1);
+  assert.equal(v.rangeShots, 3);
+  assert.equal(v.strokes, 0);
+  assert.equal(practice.s.rangeStats.shots, 3);
+  assert.equal(practice.s.rangeStats.revenue, 7);
+  for (let i = 0; i < 8000 && !v.finished; i++) psim.tick(0.25);
+  assert(v.finished);
+  assert(practice.s.trails.length > 0);
+  assert(practice.s.members[v.memberId].rounds > 0);
+  const restored = deserialize(serialize(practice.s));
+  assert.equal(restored.members[v.memberId].rounds, 1);
+  assert.equal(restored.trails.length, practice.s.trails.length);
+  const legacy = JSON.parse(serialize(practice.s));
+  delete legacy.plots;
+  delete legacy.plotW;
+  delete legacy.plotH;
+  delete legacy.ownerRounds;
+  legacy.version = 3;
+  legacy.land = 4;
+  legacy.capacity = 18;
+  legacy.player.stats.best = { holes: 9, relative: -1 };
+  const migrated = deserialize(JSON.stringify(legacy));
+  assert.equal(migrated.capacity, 18);
+  assert.deepEqual(migrated.plots, [true, true, true, true]);
+  assert(ownedAt(migrated, { x: 2390, y: 1790 }));
+  assert.equal(migrated.ownerRounds[0].relative, -1);
+  console.log(
+    "Club progression, returning visitors, tournaments, practice, trails and legacy saves: PASS",
+  );
+}

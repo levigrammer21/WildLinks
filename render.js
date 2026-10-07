@@ -5,6 +5,7 @@ import {
   COLORS,
   T,
   landSize,
+  landPlots,
   dist,
   terrainAt,
   heightAt,
@@ -122,10 +123,9 @@ export class Renderer {
     if (this.dirty) this.rebuild();
     let followed = sim.visits.find((v) => v.id === this.follow);
     if (followed && !followed.finished) {
-      let p =
-        followed.state === "flying"
-          ? this.ballPosition(followed)
-          : followed.ball;
+      let p = ["flying", "rangeFlying"].includes(followed.state)
+        ? this.ballPosition(followed)
+        : followed.ball;
       let bottom = this.mode === "play" ? 215 : 130,
         cy = p.y + (bottom - 50) / 2 / c.zoom,
         cx = p.x;
@@ -167,6 +167,8 @@ export class Renderer {
     ctx.clip();
     this.details(ctx, time);
     this.facilities(ctx);
+    this.practice(ctx);
+    this.trails(ctx);
     for (let i = 0; i < s.holes.length; i++)
       this.hole(
         ctx,
@@ -186,6 +188,21 @@ export class Renderer {
       ctx.setLineDash([]);
       ctx.fillStyle = "#ffffff12";
       ctx.fill();
+    }
+    for (const p of landPlots(s)) {
+      if (!p.owned) {
+        ctx.fillStyle = "#24433eee";
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        this.label(
+          ctx,
+          p.x + p.w / 2,
+          p.y + p.h / 2,
+          p.name + " · land for sale",
+        );
+      }
+      ctx.strokeStyle = "#efe6c655";
+      ctx.lineWidth = 1 / c.zoom;
+      ctx.strokeRect(p.x, p.y, p.w, p.h);
     }
     ctx.restore();
     ctx.strokeStyle = "#e4dab076";
@@ -274,12 +291,14 @@ export class Renderer {
   facilities(ctx) {
     let buildings = [
       { id: "check", name: "CHECK-IN", x: 38, y: 30 },
-      ...this.s.facilities.map((id, i) => ({
-        id,
-        name: id.toUpperCase(),
-        x: 38 + (i % 4) * 42,
-        y: 72 + Math.floor(i / 4) * 38,
-      })),
+      ...this.s.facilities
+        .filter((id) => id !== "range")
+        .map((id, i) => ({
+          id,
+          name: id.toUpperCase(),
+          x: 38 + (i % 4) * 42,
+          y: 72 + Math.floor(i / 4) * 38,
+        })),
     ];
     ctx.fillStyle = "#bcab83";
     ctx.fillRect(0, 42, 55, 10);
@@ -308,6 +327,61 @@ export class Renderer {
         ctx.fillText(b.name, b.x, b.y + 19);
       }
     }
+  }
+  practice(ctx) {
+    const r = this.s.range || this.rangeDraft;
+    if (!r?.tee) return;
+    if (!r.target) {
+      this.label(ctx, r.tee.x, r.tee.y - 18, "RANGE TEE · choose target");
+      return;
+    }
+    const z = this.camera.zoom;
+    ctx.save();
+    ctx.strokeStyle = "#ece5b466";
+    ctx.lineWidth = 1.5 / z;
+    ctx.setLineDash([8 / z, 6 / z]);
+    ctx.beginPath();
+    ctx.moveTo(r.tee.x, r.tee.y);
+    ctx.lineTo(r.target.x, r.target.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const radius of [12, 25, 40]) {
+      ctx.beginPath();
+      ctx.arc(r.target.x, r.target.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#dacd96";
+    for (let i = 0; i < 3; i++)
+      ctx.fillRect(r.tee.x + i * 6 - 3, r.tee.y - 3, 5, 6);
+    this.label(ctx, r.tee.x, r.tee.y - 18, "DRIVING RANGE");
+    ctx.restore();
+  }
+  trails(ctx) {
+    const s = this.s;
+    if (!s.showTrails) return;
+    ctx.save();
+    ctx.lineWidth = 1.2 / this.camera.zoom;
+    for (const t of s.trails.slice(-500)) {
+      const f = s.trailFilter;
+      if (
+        (f === "owner" && t.memberId !== "owner") ||
+        (f === "beginner" && t.skill >= 0.35) ||
+        (f === "club" && (t.skill < 0.35 || t.skill >= 0.78)) ||
+        (f === "scratch" && t.skill < 0.78)
+      )
+        continue;
+      ctx.strokeStyle = t.penalty ? "#f88b7160" : "#ffe39d45";
+      ctx.fillStyle = t.penalty ? "#ff826eaa" : "#ffe39d88";
+      ctx.beginPath();
+      ctx.moveTo(t.start.x, t.start.y);
+      for (const p of t.points || []) ctx.lineTo(p.x, p.y);
+      ctx.lineTo(t.end.x, t.end.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(t.land.x, t.land.y, 2.5 / this.camera.zoom, 0, 7);
+      ctx.fill();
+    }
+    ctx.restore();
   }
   hole(ctx, h, i, selected) {
     let z = this.camera.zoom;
@@ -395,9 +469,10 @@ export class Renderer {
     ctx.restore();
   }
   ballPosition(v) {
-    if (v.state !== "flying" || !v.shot) return v.ball;
-    let path = v.shot.path,
-      t = clamp(v.timer / v.shot.duration, 0, 1) * (path.length - 1),
+    const shot = v.state === "rangeFlying" ? v.rangeShot : v.shot;
+    if (!["flying", "rangeFlying"].includes(v.state) || !shot) return v.ball;
+    let path = shot.path,
+      t = clamp(v.timer / shot.duration, 0, 1) * (path.length - 1),
       i = Math.floor(t),
       a = path[i],
       b = path[Math.min(path.length - 1, i + 1)];
@@ -463,10 +538,9 @@ export class Renderer {
     ctx.strokeStyle = "#b2c7b6";
     ctx.lineWidth = 1 / z;
     ctx.beginPath();
-    let swing =
-      v.state === "flying"
-        ? Math.sin(Math.min(1, v.timer / 0.35) * Math.PI) * 2
-        : 0;
+    let swing = ["flying", "rangeFlying"].includes(v.state)
+      ? Math.sin(Math.min(1, v.timer / 0.35) * Math.PI) * 2
+      : 0;
     ctx.moveTo(p.x + size * 0.5, p.y);
     ctx.lineTo(
       p.x + size * 1.5 + Math.sin(swing) * size,
@@ -485,9 +559,10 @@ export class Renderer {
     ctx.arc(b.x, b.y - (b.z || 0) * 0.55, Math.max(1.6, 2.8 / z), 0, 7);
     ctx.fill();
     ctx.shadowBlur = 0;
-    if (v.state === "flying" && selected) {
-      const path = v.shot.path,
-        t = clamp(v.timer / v.shot.duration, 0, 1);
+    if (["flying", "rangeFlying"].includes(v.state) && selected) {
+      const shot = v.state === "rangeFlying" ? v.rangeShot : v.shot,
+        path = shot.path,
+        t = clamp(v.timer / shot.duration, 0, 1);
       ctx.strokeStyle = "#fff2";
       ctx.lineWidth = 1.5 / z;
       ctx.beginPath();

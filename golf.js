@@ -357,7 +357,7 @@ export function executeShot(s, g, p, pin, c, power, angle) {
       x: clamp(safe.x - Math.cos(a) * 6, 3, l.w - 3),
       y: clamp(safe.y - Math.sin(a) * 6, 3, l.h - 3),
     };
-    if (terrainAt(s, drop) === 4) drop = { ...p };
+    if ([4, -1].includes(terrainAt(s, drop))) drop = { ...p };
     end = drop;
   }
   if (!penalty && !holed && dist(end, pin) < 0.55 && terrainAt(s, end) === 2) {
