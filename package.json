@@ -1,0 +1,10 @@
+{
+  "name": "wild-links",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests.mjs",
+    "start": "python3 -m http.server 8080"
+  }
+}

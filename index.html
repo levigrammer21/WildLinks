@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#122e29" />
+    <title>Wild Links · Golf Course Tycoon</title>
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <canvas
+      id="course"
+      aria-label="Golf course. Drag to move, pinch to zoom. In build mode drag to paint. In play mode pull backward from the ball to shoot."
+    ></canvas>
+    <header id="top">
+      <button id="brand" aria-label="Clubhouse">
+        ⛳ <span>WILD LINKS<small id="day">DAY 1 · 08:00</small></span>
+      </button>
+      <div class="wallet">
+        <strong id="cash">$5,000</strong
+        ><small id="business">Closed · 0 holes</small>
+      </div>
+      <button id="time" aria-label="Time controls">1×</button>
+    </header>
+    <div id="objective" role="status"></div>
+    <div id="toasts" aria-live="polite"></div>
+    <aside id="watchcard" hidden></aside>
+    <div id="maptools">
+      <button id="zoomIn" aria-label="Zoom in">+</button
+      ><button id="zoomOut" aria-label="Zoom out">−</button
+      ><button id="home" aria-label="Frame course">⌖</button>
+    </div>
+    <section id="buildbar" hidden>
+      <div class="buildhead">
+        <button id="holeSelect">Hole 1 ▾</button
+        ><span id="buildInfo">Place a tee</span
+        ><button id="undo" aria-label="Undo">↶</button
+        ><button id="redo" aria-label="Redo">↷</button>
+      </div>
+      <div id="tools"></div>
+      <div class="brushrow">
+        <label
+          >Brush
+          <input id="brush" type="range" min="6" max="70" value="24" /></label
+        ><span id="costLabel"></span><button id="openHole">Open hole</button>
+      </div>
+    </section>
+    <section id="shotbar" hidden>
+      <div>
+        <strong id="shotInfo"></strong
+        ><small id="shotHint">Pull back from the ball. Release to swing.</small>
+      </div>
+      <select id="club" aria-label="Select club"></select
+      ><button id="autoAim">Aim at pin</button
+      ><button id="endRound">Leave round</button>
+    </section>
+    <nav id="bottom">
+      <button id="build"><span>✎</span>Build</button
+      ><button id="watch"><span>◉</span>Watch</button
+      ><button id="play"><span>⚑</span>Play course</button
+      ><button id="clubhouse"><span>⌂</span>Clubhouse</button>
+    </nav>
+    <div id="overlay" hidden>
+      <section
+        id="sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sheetTitle"
+      >
+        <div class="sheettop">
+          <h2 id="sheetTitle"></h2>
+          <button id="closeSheet" aria-label="Close">✕</button>
+        </div>
+        <div id="sheetBody"></div>
+      </section>
+    </div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

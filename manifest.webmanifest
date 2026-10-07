@@ -1,0 +1,17 @@
+{
+  "name": "Wild Links · Golf Course Tycoon",
+  "short_name": "Wild Links",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#122e29",
+  "theme_color": "#122e29",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
