@@ -1,4 +1,4 @@
-const CACHE = "wild-links-v1.2.1";
+const CACHE = "wild-links-v1.2.2";
 const FILES = [
   "./",
   "./index.html",
@@ -8,6 +8,8 @@ const FILES = [
   "./cloud.js",
   "./records.js",
   "./range.js",
+  "./facilities.js",
+  "./pwa.js",
   "./design.js",
   "./world.js",
   "./golf.js",
@@ -15,6 +17,10 @@ const FILES = [
   "./render.js",
   "./persistence.js",
   "./icon.svg",
+  "./icon-180.png",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./icon-maskable-512.png",
   "./manifest.webmanifest",
 ];
 self.addEventListener("install", (e) => {

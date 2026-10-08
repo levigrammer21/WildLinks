@@ -1,3 +1,5 @@
+import { facilityBuildings, validateFacilityPosition } from "./facilities.js";
+import { rangeFits } from "./range.js";
 import {
   CELL,
   GW,
@@ -97,8 +99,9 @@ export function landingClusters(s, { hole = null, filter = "all" } = {}) {
 export function selectFeature(s, p) {
   if (s.range && dist(p, s.range.tee) < 20)
     return { kind: "range", center: { ...s.range.tee } };
-  for (const [id, pos] of Object.entries(s.facilityPositions || {}))
-    if (dist(p, pos) < 22) return { kind: "facility", id, center: { ...pos } };
+  for (const b of facilityBuildings(s))
+    if (dist(p, b) < 22)
+      return { kind: "facility", id: b.id, center: { x: b.x, y: b.y } };
   const terrain = terrainAt(s, p);
   if (![T.GREEN, T.SAND].includes(terrain)) return null;
   const start = index(p.x, p.y),
@@ -144,6 +147,9 @@ export function planTransform(s, f, center, scale = 1) {
       (f.kind === "range" && !ownedAt(s, { x: center.x + 12, y: center.y }))
     )
       throw Error("Keep the complete feature on owned land.");
+    if (f.kind === "facility") validateFacilityPosition(s, f.id, center);
+    if (f.kind === "range" && !rangeFits(s, center, target))
+      throw Error("Keep the complete practice corridor on owned land.");
     return { center, moved, scale: 1, cost: 80 };
   }
   scale = clamp(scale, 0.6, 1.6);

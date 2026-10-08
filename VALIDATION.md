@@ -1,4 +1,4 @@
-# Wild Links 1.2.1 — validation
+# Wild Links 1.2.2 — validation
 
 Validated on October 7, 2026.
 
@@ -67,3 +67,14 @@ Firebase account and cloud tests use an isolated response harness. They verify r
 - Course records remain unchanged for worse scores, ties and pickups; alternate tee labels using the Standard position share a comparison. Real alternate tees retain distinct bests. Save/reload reconciles old record history.
 - Actual phone-sized touch events: build/open a hole, confirm the tutorial clears, enter Build again without its return, place a range with one tap, rotate, choose a manual target, confirm construction expenses, and reload. Verified the owner receives the shared Punch shot club in a tree lie.
 - Phone, landscape and tablet viewport checks passed with zero JavaScript runtime errors. The complete original simulation/cloud suite also passed.
+
+## 1.2.2 install and building checks
+
+Chromium over HTTP on a phone-sized touch viewport passed with zero runtime errors:
+
+- Manifest parsed successfully under a repository subpath. Chromium Page.getInstallabilityErrors reported an empty array. Icons provide 192×192 and 512×512 plus a separate maskable icon and 180×180 Apple touch icon.
+- Browser-provided install-event handling was tested using a controlled prompt event; accepted requests clear the prompt and appinstalled changes the install status. Safari/iPad fallback instructions were checked through the actual screen. A real operating-system installation was not performed in headless testing.
+- Service-worker readiness and offline reload preserved the game.
+- Duplicate pro-shop confirmation did not charge twice. Built cards offer Move without another Buy button.
+- Moved a shop and check-in hut using touch. Canvas draw calls used the destination, the original drawing disappeared, arrivals used the moved check-in, and Undo/Redo/reload retained positions. Relocation did not increment the hole's design revision.
+- The complete simulation, mocked-cloud and 1.2.1 regression suite passed.

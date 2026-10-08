@@ -1,4 +1,4 @@
-export const VERSION = "1.2.1",
+export const VERSION = "1.2.2",
   CELL = 4,
   GW = 600,
   GH = 450;

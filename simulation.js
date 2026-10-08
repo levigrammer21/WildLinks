@@ -1,3 +1,4 @@
+import { facilityPosition } from "./facilities.js";
 import { normalizeRecord, shouldReplaceSummary } from "./records.js";
 import { playedHole, chooseTees, teeFor, addJournal } from "./design.js";
 import {
@@ -262,7 +263,8 @@ export class Simulation {
     this.s.daily.revenue += income;
     this.s.lifetimeRevenue += income;
     v.group = "group-" + Math.floor(this.seq++ / 2);
-    v.pos = { x: 38 + (this.seq % 3) * 6, y: 44 };
+    const check = facilityPosition(this.s, "check");
+    v.pos = { x: check.x + (this.seq % 3) * 6, y: check.y + 14 };
     v.state = "between";
     const freeBay = [0, 1, 2].find(
       (b) =>

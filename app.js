@@ -1,3 +1,5 @@
+import { facilityPosition } from "./facilities.js";
+import { InstallController } from "./pwa.js";
 import { suggestRange, rangeFits } from "./range.js";
 import {
   VERSION,
@@ -336,7 +338,8 @@ function commitTx(t) {
   redo = [];
   const h = s.holes[holeIndex],
     oldRev = h.revisionStats?.[h.revision];
-  if (oldRev?.n) {
+  const courseChange = t.tool !== "object" || t.cells.size > 0;
+  if (oldRev?.n && courseChange) {
     h.designBaseline = { ...oldRev };
     addJournal(
       s,
@@ -349,7 +352,7 @@ function commitTx(t) {
       { hole: h.id },
     );
   }
-  s.holes[holeIndex].revision++;
+  if (courseChange) s.holes[holeIndex].revision++;
   entry.after = structuredClone(s.holes);
   sim.invalidate();
   renderer.dirty = true;
@@ -451,6 +454,8 @@ function confirmRangePlacement() {
     toast("Tap a target on your land, at least 80 yards away.");
   };
   $("confirmRange").onclick = () => {
+    if (s.facilities.includes("range"))
+      return toast("Your driving range is already built.");
     if (s.cash < f.cost) return toast("Not enough money.");
     s.cash -= f.cost;
     s.daily.expenses += f.cost;
@@ -1073,10 +1078,43 @@ function showClub(tab = "overview") {
   if (tab === "save") clubSave(content);
   if (tab === "journal") clubJournal(content);
 }
+const installation = new InstallController(() => {
+  const button = $("installApp");
+  if (button) button.textContent = installation.label;
+});
+function showInstall() {
+  const apple =
+    /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  sheet(
+    "Install Wild Links",
+    installation.standalone
+      ? "<p>Wild Links is already running as an app. Your course saves as you play.</p>"
+      : `<p>Keep Wild Links on your home screen and open it in its own app window. Once loaded, the game can run offline; cloud saves sync when you reconnect.</p>${installation.canPrompt ? '<button id="nativeInstall" class="primary">Install app</button>' : ""}<h3>${apple ? "On your iPad / iPhone" : "On your phone"}</h3><p>${apple ? "Open this game in Safari. Tap Share, then Add to Home Screen. Enable Open as Web App if shown, then tap Add." : "Open this game in Chrome or Samsung Internet. Use the browser menu, then Install app or Add to Home screen. If the menu offers Install, confirm it."}</p><p class="note">If opened inside another app, choose Open in browser first. If the installed app opens a fresh course, sign in to your account or import your JSON backup from Save & courses.</p>`,
+  );
+  if ($("nativeInstall"))
+    $("nativeInstall").onclick = async () => {
+      const result = await installation.prompt();
+      if (result === "accepted") {
+        toast(
+          "Installation requested. Look for Wild Links on your home screen.",
+        );
+        closeSheet();
+      } else {
+        toast(
+          result === "dismissed"
+            ? "You can install later from the clubhouse."
+            : "Use your browser menu to install.",
+        );
+        showInstall();
+      }
+    };
+}
 function clubOverview(el) {
   let n = s.holes.filter((h) => h.open).length,
     active = sim.visits.filter((v) => !v.finished && !v.player).length;
-  el.innerHTML = `<div class="grid"><div class="stat"><strong>${money(s.daily.revenue)}</strong><small>Today’s receipts</small></div><div class="stat"><strong>${s.daily.served}</strong><small>Completed rounds today</small></div><div class="stat"><strong>${Math.round(s.reputation)} / 100</strong><small>Reputation</small></div><div class="stat"><strong>${Math.round(s.conditions)}%</strong><small>Course conditions</small></div></div><h3>Green fee</h3><p>A ${n}-hole visit currently costs ${money(s.fee)}. ${active} golfers on the property. ${demand(s) > 1.8 ? "Demand is strong." : demand(s) > 0.7 ? "Demand is steady." : "Demand is light."}</p><label class="field">Fee per round<input id="feeInput" type="number" inputmode="numeric" min="0" max="250" value="${s.fee}"></label><div class="row"><button class="primary" id="setFee">Set fee</button><button id="businessToggle">${s.opened ? "Close admissions" : "Open admissions"}</button><button id="routing">Course routing</button></div><h3>Operating day</h3><p>08:00–18:00 arrivals; the property closes after the last round. ${s.weather.name}. Daily care, facilities and wages: <b>${money(dailyCosts(s))}</b>.</p><div class="row"><button id="nextDay">Finish day</button><button id="dailyReport" ${s.history.length ? "" : "disabled"}>Last daily report</button><button id="care">Restore conditions · $180</button></div><h3>Club events</h3><p>${s.tournament ? esc(s.tournament.name) + " is running until Day " + s.tournament.ends + "." : n >= 6 ? "Host a two-day open. Visitors compete on your current layout. Event receipts depend on completed rounds." : "Open at least six holes to host a club tournament."}</p><button id="tournament" ${n < 3 || s.tournament || s.cash < 350 ? "disabled" : ""}>Host a club open · $350</button>`;
+  el.innerHTML = `<button id="installApp" class="primary">${installation.label}</button><div class="grid"><div class="stat"><strong>${money(s.daily.revenue)}</strong><small>Today’s receipts</small></div><div class="stat"><strong>${s.daily.served}</strong><small>Completed rounds today</small></div><div class="stat"><strong>${Math.round(s.reputation)} / 100</strong><small>Reputation</small></div><div class="stat"><strong>${Math.round(s.conditions)}%</strong><small>Course conditions</small></div></div><h3>Green fee</h3><p>A ${n}-hole visit currently costs ${money(s.fee)}. ${active} golfers on the property. ${demand(s) > 1.8 ? "Demand is strong." : demand(s) > 0.7 ? "Demand is steady." : "Demand is light."}</p><label class="field">Fee per round<input id="feeInput" type="number" inputmode="numeric" min="0" max="250" value="${s.fee}"></label><div class="row"><button class="primary" id="setFee">Set fee</button><button id="businessToggle">${s.opened ? "Close admissions" : "Open admissions"}</button><button id="routing">Course routing</button></div><h3>Operating day</h3><p>08:00–18:00 arrivals; the property closes after the last round. ${s.weather.name}. Daily care, facilities and wages: <b>${money(dailyCosts(s))}</b>.</p><div class="row"><button id="nextDay">Finish day</button><button id="dailyReport" ${s.history.length ? "" : "disabled"}>Last daily report</button><button id="care">Restore conditions · $180</button></div><h3>Club events</h3><p>${s.tournament ? esc(s.tournament.name) + " is running until Day " + s.tournament.ends + "." : n >= 6 ? "Host a two-day open. Visitors compete on your current layout. Event receipts depend on completed rounds." : "Open at least six holes to host a club tournament."}</p><button id="tournament" ${n < 3 || s.tournament || s.cash < 350 ? "disabled" : ""}>Host a club open · $350</button>`;
+  $("installApp").onclick = showInstall;
   $("setFee").onclick = () => {
     s.fee = clamp(+$("feeInput").value || 0, 0, 250);
     save();
@@ -1388,11 +1426,14 @@ function showTrails() {
 }
 function clubFacilities(el) {
   el.innerHTML =
-    "<p>Facilities support the golf. Your original check-in hut is already on the property.</p>" +
+    '<p>One of each facility serves your course. Move existing buildings with one tap, review the $80 relocation cost, then confirm.</p><div class="item"><div><b>Check-in hut</b><p>Your original arrival point.</p></div><button data-move-fac="check">Move</button></div>' +
     FACILITIES.map(
       (f) =>
-        `<div class="item"><div><b>${f.name}</b><p>${f.description}</p><small>${money(f.cost)} construction · ${money(f.upkeep)} daily care</small></div><button data-fac="${f.id}" ${s.facilities.includes(f.id) || s.cash < f.cost ? "disabled" : ""}>${s.facilities.includes(f.id) ? "Built" : "Build"}</button></div>`,
+        `<div class="item"><div><b>${f.name}</b><p>${f.description}</p><small>${money(f.cost)} construction · ${money(f.upkeep)} daily care</small></div>${s.facilities.includes(f.id) ? `<button data-move-fac="${f.id}">Move</button>` : `<button data-fac="${f.id}" ${s.cash < f.cost ? "disabled" : ""}>Build</button>`}</div>`,
     ).join("");
+  el.querySelectorAll("[data-move-fac]").forEach(
+    (b) => (b.onclick = () => moveFacility(b.dataset.moveFac)),
+  );
   el.querySelectorAll("[data-fac]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -1418,6 +1459,9 @@ function clubFacilities(el) {
         );
         $("facilityNo").onclick = () => showClub("facilities");
         $("facilityYes").onclick = () => {
+          if (s.facilities.includes(f.id))
+            return toast("This facility is already built.");
+          if (s.cash < f.cost) return toast("Not enough money.");
           s.cash -= f.cost;
           s.daily.expenses += f.cost;
           s.facilities.push(f.id);
@@ -1586,9 +1630,10 @@ function clubReviews(el) {
     .join("")}`;
 }
 function clubSave(el) {
-  el.innerHTML = `<label class="field">Course name<input id="courseName" maxlength="32" value="${esc(s.name)}"></label><button id="saveCourseName">Save name</button><h3>Save and backup</h3><p>Your course and ongoing rounds autosave every 20 seconds and after important changes. Save files can move between devices.</p><p class="note">Last saved: ${s.lastSaved ? new Date(s.lastSaved).toLocaleString() : "Not yet"}. Saves are stored in this browser; export a backup before clearing browser data.</p><div class="row"><button class="primary" id="manualSave">Save now</button><button id="exportSave">Export save</button><button id="importSave">Import save</button></div><input type="file" id="saveFile" accept="application/json,.json" hidden><h3>Controls</h3><p>Watch: drag to pan, pinch to zoom, tap a golfer to follow.<br>Build: draw with one finger. Two fingers or Move tool pan. Pick a brush size; undo and redo refund or charge costs.<br>Play: touch near your ball, pull backward to aim and set power, release to hit. Drag elsewhere to inspect the hole. Change club for a different range.</p><h3>Your course collection</h3><div class="row"><button id="savedCourses">Saved courses & account</button><button class="primary" id="newGame">Start a new course</button></div>`;
+  el.innerHTML = `<label class="field">Course name<input id="courseName" maxlength="32" value="${esc(s.name)}"></label><button id="saveCourseName">Save name</button><h3>Save and backup</h3><p>Your course and ongoing rounds autosave every 20 seconds and after important changes. Save files can move between devices.</p><p class="note">Last saved: ${s.lastSaved ? new Date(s.lastSaved).toLocaleString() : "Not yet"}. Saves are stored in this browser; export a backup before clearing browser data.</p><div class="row"><button class="primary" id="manualSave">Save now</button><button id="exportSave">Export save</button><button id="importSave">Import save</button></div><input type="file" id="saveFile" accept="application/json,.json" hidden><h3>Controls</h3><p>Watch: drag to pan, pinch to zoom, tap a golfer to follow.<br>Build: draw with one finger. Two fingers or Move tool pan. Pick a brush size; undo and redo refund or charge costs.<br>Play: touch near your ball, pull backward to aim and set power, release to hit. Drag elsewhere to inspect the hole. Change club for a different range.</p><h3>Install on your device</h3><button id="installApp">${installation.label}</button><h3>Your course collection</h3><div class="row"><button id="savedCourses">Saved courses & account</button><button class="primary" id="newGame">Start a new course</button></div>`;
   $("savedCourses").onclick = () =>
     cloud.session ? showAccount() : showCourses();
+  $("installApp").onclick = showInstall;
   $("saveCourseName").onclick = () => {
     s.name = $("courseName").value.trim() || "Wild Links";
     save();
@@ -1939,14 +1984,27 @@ function startObjectEdit(i = holeIndex) {
   setMode("build");
   tool = "object";
   objectDraft = { stage: "select" };
-  for (const [i, id] of s.facilities.filter((id) => id !== "range").entries())
-    s.facilityPositions[id] ||= {
-      x: 38 + (i % 4) * 42,
-      y: 72 + Math.floor(i / 4) * 38,
-    };
   toast(
     "Tap a green, bunker, driving-range tee or facility to move or resize it.",
   );
+}
+function moveFacility(id) {
+  if (s.tournament)
+    return toast("Finish the tournament before moving buildings.");
+  if (tx || pending) return toast("Finish construction first.");
+  const feature =
+    id === "range" && s.range
+      ? { kind: "range", center: { ...s.range.tee } }
+      : { kind: "facility", id, center: facilityPosition(s, id) };
+  if (!feature.center) return;
+  closeSheet();
+  setMode("build");
+  tool = "object";
+  objectDraft = { stage: "move", feature };
+  renderer.editFeature = feature;
+  renderer.frame();
+  updateUI();
+  toast("Tap the new location. Moving costs $80 on confirmation.");
 }
 function objectSheet() {
   const f = objectDraft.feature;
@@ -1962,7 +2020,19 @@ function objectSheet() {
       objectDraft = null;
       renderer.editFeature = null;
       closeSheet();
-      commitTx(t);
+      if (commitTx(t) && f.kind !== "terrain") {
+        addJournal(
+          s,
+          "Facility relocated",
+          (f.kind === "range"
+            ? "Driving range"
+            : f.id === "check"
+              ? "Check-in hut"
+              : FACILITIES.find((b) => b.id === f.id)?.name || "Building") +
+            " moved to a new location on your property.",
+        );
+        save();
+      }
       tool = "hand";
       renderTools();
     };

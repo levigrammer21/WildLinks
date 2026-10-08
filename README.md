@@ -1,3 +1,9 @@
+## New in 1.2.2
+
+- Install from Clubhouse → Install Wild Links. Android browsers can offer a native install prompt; iPad/iPhone use Safari → Share → Add to Home Screen. Standalone mode and launcher icons are supplied. The app keeps its offline fallback and optional cloud saves.
+- One of each facility serves the course. Built facility cards offer Move, including the check-in hut and driving range. Repeat construction requests cannot charge twice; old duplicate facility entries are merged on load.
+- Building positions are shared by rendering, selection and arrivals. Tap Move, tap the destination, review the $80 cost and confirm. Undo/Redo and saves preserve relocation; buildings must fit on owned land with space between them.
+
 ## Fixes in 1.2.1
 
 - Low punch recoveries escape trees through trunk-aware shared physics; golfers search sideways and backward exits. The owner has the same Punch shot club.
@@ -19,7 +25,7 @@
 
 Read **FIREBASE_SETUP.md** and publish **firestore.rules** before using private cloud saves. Firebase console settings require the project owner; the ZIP includes everything needed on the game side.
 
-# Wild Links — v1.2.1
+# Wild Links — v1.2.2
 
 A mobile-first golf course sandbox and tycoon game. Start with an undeveloped property, $5,000, a check-in hut, and capacity for three holes. Paint your own golf architecture, open it to paying visitors, watch their shots, and play the same course yourself.
 
@@ -73,6 +79,12 @@ Tournaments require at least 6, 9 or 18 open holes, cost $350 / $600 / $1,200 to
 Facilities add comfort and services. Staff do specific jobs: groundskeepers repair wear, check-in workers shorten admission intervals and operate the shop, mechanics enable faster cart travel, professionals add paid range coaching, and service staff operate the café. Facility care and wages are charged daily. Beyond 18 holes, improve reputation, refine your architecture, run tournaments and pursue course records.
 
 Records include hole scoring, longest drives, longest holed putts, closest approaches, aces, course records, visitor bests, personal bests and a record book. Different available routing configurations have their own current comparison; historical entries remain preserved. Nine- and eighteen-hole records populate when those rounds are played.
+
+## Install on your phone or tablet
+
+Publish the complete root-only project on GitHub Pages (HTTPS). Open Clubhouse → Install Wild Links. If a browser install prompt is available, tap Install app. Otherwise follow the displayed browser-menu or Safari home-screen steps. Installed mode opens Wild Links in its own window. Load once online to prepare offline play; cloud synchronization requires internet.
+
+Your app and browser may use different local storage on some devices. Sign in to continue a cloud course, or export/import your JSON backup if the installed app starts fresh. No application-store setup or build system is required.
 
 ## Saves
 

@@ -1,5 +1,5 @@
 {
-  "name": "Wild Links · Golf Course Tycoon",
+  "name": "Wild Links \u00b7 Golf Course Tycoon",
   "short_name": "Wild Links",
   "start_url": "./",
   "scope": "./",
@@ -8,10 +8,31 @@
   "theme_color": "#122e29",
   "icons": [
     {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "id": "./",
+  "description": "Build your own golf course, manage its business and play every hole.",
+  "orientation": "any",
+  "categories": [
+    "games",
+    "entertainment"
+  ],
+  "lang": "en",
+  "prefer_related_applications": false
 }

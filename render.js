@@ -1,3 +1,4 @@
+import { facilityBuildings } from "./facilities.js";
 import { landingClusters } from "./design.js";
 import {
   CELL,
@@ -292,19 +293,10 @@ export class Renderer {
       }
   }
   facilities(ctx) {
-    let buildings = [
-      { id: "check", name: "CHECK-IN", x: 38, y: 30 },
-      ...this.s.facilities
-        .filter((id) => id !== "range")
-        .map((id, i) => ({
-          id,
-          name: id.toUpperCase(),
-          x: 38 + (i % 4) * 42,
-          y: 72 + Math.floor(i / 4) * 38,
-        })),
-    ];
+    const buildings = facilityBuildings(this.s);
     ctx.fillStyle = "#bcab83";
-    ctx.fillRect(0, 42, 55, 10);
+    const check = buildings.find((b) => b.id === "check");
+    ctx.fillRect(check.x - 28, check.y + 12, 55, 10);
     for (const b of buildings) {
       ctx.fillStyle = "#102a3040";
       ctx.fillRect(b.x - 13, b.y - 8, 33, 24);

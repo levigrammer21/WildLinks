@@ -84,6 +84,7 @@ export function deserialize(raw) {
       d.capacity >= 18 ? 3 : d.capacity >= 9 ? 2 : d.capacity >= 6 ? 1 : 0;
   }
   s.capacity = Math.max(3, s.capacity, s.holes.length);
+  s.facilities = [...new Set(s.facilities)];
   s.members ||= {};
   s.trails ||= [];
   s.ownerRounds ||= [];

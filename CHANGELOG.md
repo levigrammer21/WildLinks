@@ -1,3 +1,10 @@
+# Wild Links 1.2.2
+
+- Add an install screen with native prompt support, Android/iPad fallback instructions and installed-app recognition. Supply 180/192/512 PNG icons, a maskable icon, manifest identity, Apple web-app metadata and complete offline caching.
+- Replace already-built facility purchase buttons with Move. Guard duplicate confirmations and deduplicate old facility entries on load.
+- Fix facility rendering to honor saved positions; rendering, selection and golfer arrivals now share one position source. Include the check-in hut and driving range in relocation controls.
+- Validate building footprints and spacing. Relocations retain quotes, Undo/Redo and persistence and do not reset hole design statistics.
+
 # Wild Links 1.2.1
 
 - Fix tree recovery: low punch shots use procedural trunk/canopy collision and search sideways/backward safe exits. Owners and AI share the new recovery club and physics.

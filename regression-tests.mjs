@@ -135,3 +135,32 @@ for (const layout of ["grove", "blocked-forward"]) {
   assert(!rangeFits(s, { x: 10, y: 10 }, { x: 610, y: 10 }));
   console.log("One-tap range suggestions and owned corridor validation: PASS");
 }
+
+// Facility selection and save migration share visible building coordinates.
+{
+  const { facilityPosition, validateFacilityPosition } =
+    await import("./facilities.js");
+  const { selectFeature, planTransform, applyTransform } =
+    await import("./design.js");
+  const s = initialState();
+  s.facilities = ["shop", "shop"];
+  const restored = deserialize(serialize(s));
+  assert.deepEqual(restored.facilities, ["shop"]);
+  const origin = facilityPosition(restored, "shop"),
+    feature = selectFeature(restored, origin);
+  assert.equal(feature.id, "shop");
+  const plan = planTransform(restored, feature, { x: 300, y: 180 });
+  applyTransform(restored, feature, plan, { cells: new Map(), cost: 0 });
+  assert.deepEqual(facilityPosition(restored, "shop"), { x: 300, y: 180 });
+  assert.throws(
+    () => validateFacilityPosition(restored, "shop", { x: 5, y: 5 }),
+    /whole building/,
+  );
+  assert.throws(
+    () => validateFacilityPosition(restored, "shop", { x: 38, y: 30 }),
+    /space/,
+  );
+  console.log(
+    "Facility deduplication, shared selection/positions and footprint/spacing: PASS",
+  );
+}
