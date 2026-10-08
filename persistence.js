@@ -85,6 +85,11 @@ export function deserialize(raw) {
   }
   s.capacity = Math.max(3, s.capacity, s.holes.length);
   s.facilities = [...new Set(s.facilities)];
+  s.decorations ||= [];
+  s.workers ||= [];
+  s.fans ||= [];
+  s.fanFee ??= 4;
+  s.fanStats ||= { served: 0, revenue: 0 };
   s.members ||= {};
   s.trails ||= [];
   s.ownerRounds ||= [];

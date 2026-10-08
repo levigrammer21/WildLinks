@@ -1,4 +1,4 @@
-export const VERSION = "1.2.2",
+export const VERSION = "1.3.0",
   CELL = 4,
   GW = 600,
   GH = 450;
@@ -122,6 +122,11 @@ export function initialState() {
     terrain: naturalLand(),
     heights: new Float32Array(GW * GH),
     facilities: [],
+    decorations: [],
+    workers: [],
+    fans: [],
+    fanFee: 4,
+    fanStats: { served: 0, revenue: 0 },
     staff: { grounds: 0, desk: 0, mechanic: 0, pro: 0, service: 0 },
     records: {
       overall: null,

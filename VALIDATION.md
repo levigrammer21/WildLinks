@@ -1,3 +1,15 @@
+# Wild Links 1.3.0 — validation
+
+Validated on October 8, 2026.
+
+- Full seeded engine, economy/progression, records/recovery, persistence and mocked Firebase suites pass. Straight, dogleg, double-dogleg, island, nine-hole and eighteen-hole layouts remain playable by the shared owner/AI engine.
+- New life tests verify dry pond detours, bridge crossings, visible ferries reaching disconnected greens, groundskeeper travel/work and actual maintenance accrual, range-pro positioning, fan eligibility, paid admission, twelve-seat capacity, cheering, departures and save restoration.
+- Chromium mobile touch checks at 390×844 verify hire/Find, quoted stand and planter placement, costs, Undo/Redo, rotation, movement, deletion, actual spectator income, persistence, 844×390 landscape and 768×1024 tablet layouts. No runtime errors or horizontal page overflow. Offline launch includes all new modules.
+- Existing PWA/building suite checks manifest installability, native install flow, iPad instructions, offline launch, duplicate purchase guard, shared building rendering/positions, relocation, Undo/Redo, reload and arrivals.
+- Graphics are Canvas/procedural. Walking routes are cached, spectators capped at 48, decorations require owned footprints; ordinary walking avoids water. Island layouts use explicit visible ferries when no dry connection exists.
+
+Firebase network behavior is verified against mocked REST responses; live project settings and Firestore security deployment remain the project owner's responsibility. Safari device behavior is covered by fallback UI checks, not a physical iPad run.
+
 # Wild Links 1.2.2 — validation
 
 Validated on October 7, 2026.

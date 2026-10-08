@@ -1,3 +1,4 @@
+import { drawDecorations, drawPeople, drawGolferExtra } from "./life-render.js";
 import { facilityBuildings } from "./facilities.js";
 import { landingClusters } from "./design.js";
 import {
@@ -169,6 +170,9 @@ export class Renderer {
     ctx.clip();
     this.details(ctx, time);
     this.facilities(ctx);
+    drawDecorations(ctx, s, time);
+    sim.life.sync();
+    drawPeople(ctx, sim, time, this);
     this.practice(ctx);
     this.trails(ctx);
     this.designOverlay(ctx);
@@ -179,7 +183,8 @@ export class Renderer {
         i,
         this.mode === "build" && this.activeHole === i,
       );
-    for (const v of sim.visits) if (!v.finished) this.golfer(ctx, v, time);
+    for (const v of sim.visits)
+      if (!v.finished || v.reactionLeft > 0) this.golfer(ctx, v, time);
     if (this.preview) this.shotPreview(ctx, this.preview);
     if (this.cursor && this.mode === "build") {
       ctx.strokeStyle = "#fff8";
@@ -573,7 +578,9 @@ export class Renderer {
     ctx.ellipse(p.x + size * 0.3, p.y + size * 0.7, size, size * 0.45, 0, 0, 7);
     ctx.fill();
     ctx.fillStyle = "#27362e";
-    let leg = v.state === "walking" ? Math.sin(time * 10) * size * 0.4 : 0;
+    let leg = ["walking", "between", "goingRange"].includes(v.state)
+      ? Math.sin(time * 10) * size * 0.4
+      : 0;
     ctx.fillRect(
       p.x - size * 0.55,
       p.y + size * 0.3,
@@ -608,6 +615,7 @@ export class Renderer {
       p.y + size * (1 - swing),
     );
     ctx.stroke();
+    drawGolferExtra(ctx, v, this, time);
     let b = this.ballPosition(v);
     ctx.fillStyle = "#203d3755";
     ctx.beginPath();

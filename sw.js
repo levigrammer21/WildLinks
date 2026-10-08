@@ -1,9 +1,12 @@
-const CACHE = "wild-links-v1.2.2";
+const CACHE = "wild-links-v1.3.0";
 const FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./navigation.js",
+  "./life.js",
+  "./life-render.js",
   "./club.js",
   "./cloud.js",
   "./records.js",

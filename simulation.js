@@ -1,3 +1,5 @@
+import { Navigation } from "./navigation.js";
+import { CourseLife, DECORATIONS } from "./life.js";
 import { facilityPosition } from "./facilities.js";
 import { normalizeRecord, shouldReplaceSummary } from "./records.js";
 import { playedHole, chooseTees, teeFor, addJournal } from "./design.js";
@@ -143,6 +145,10 @@ export function maintenanceCost(s) {
 }
 export function dailyCosts(s) {
   return (
+    (s.decorations || []).reduce(
+      (sum, d) => sum + (DECORATIONS.find((f) => f.id === d.type)?.upkeep || 0),
+      0,
+    ) +
     maintenanceCost(s) +
     FACILITIES.filter((f) => s.facilities.includes(f.id)).reduce(
       (a, f) => a + f.upkeep,
@@ -156,6 +162,9 @@ export class Simulation {
     this.s = s;
     this.notify = notify;
     this.visits = [];
+    this.navigation = new Navigation(s);
+    this.life = new CourseLife(s, this.navigation);
+    this.effects = [];
     this.arrival = 5;
     this.routes = new Map();
     this.analyses = new Map();
@@ -181,6 +190,7 @@ export class Simulation {
     return this.analyses.get(key);
   }
   invalidate() {
+    this.navigation.invalidate();
     this.routes.clear();
     this.analyses.clear();
   }
@@ -292,6 +302,8 @@ export class Simulation {
     const s = this.s;
     dt = Math.min(dt, 4);
     s.minute += dt * 0.9;
+    this.life.tick(dt, this.visits);
+    this.effects = this.effects.filter((e) => (e.age += dt) < e.duration);
     if (s.minute >= 1200 && this.visits.every((v) => v.finished || v.player)) {
       this.finishDay();
       return;
@@ -310,6 +322,7 @@ export class Simulation {
       }
     }
     for (const v of this.visits) {
+      v.reactionLeft = Math.max(0, (v.reactionLeft || 0) - dt);
       if (v.finished) continue;
       let original = s.holes.find((x) => x.id === v.holes[v.holeIndex]);
       let h = original ? playedHole(original, v) : null;
@@ -344,10 +357,12 @@ export class Simulation {
                 o.holes[o.holeIndex] === h.id,
             )
             .indexOf(v);
-          v.pos = {
+          const spot = {
             x: h.tee.x - 8 - (q % 3) * 7,
             y: h.tee.y + 10 + Math.floor(q / 3) * 8,
           };
+          if (this.navigation.walkable(spot))
+            this.navigation.move(v, spot, 30, dt);
           continue;
         }
         v.pos = { ...v.ball };
@@ -377,40 +392,41 @@ export class Simulation {
       } else if (v.state === "flying") {
         if (v.timer >= v.shot.duration) this.land(v, h);
       } else if (v.state === "walking") {
-        let d = dist(v.pos, v.ball);
-        if (d < 3) {
-          v.pos = { ...v.ball };
+        if (
+          this.navigation.move(
+            v,
+            v.ball,
+            s.facilities.includes("carts") && s.staff.mechanic ? 55 : 30,
+            dt,
+          )
+        ) {
           v.state = v.player ? "ready" : "thinking";
           v.timer = 0;
           v.plan = null;
-        } else {
-          const step = Math.min(
-            d,
-            dt * (s.facilities.includes("carts") && s.staff.mechanic ? 55 : 30),
-          );
-          v.pos.x += ((v.ball.x - v.pos.x) / d) * step;
-          v.pos.y += ((v.ball.y - v.pos.y) / d) * step;
-        }
+        } else if (v.travelMode === "ferry")
+          v.thought = "Taking the ferry to the next lie.";
       } else if (v.state === "between") {
         const next = playedHole(
-          s.holes.find((x) => x.id === v.holes[v.holeIndex]),
+          s.holes.find((h) => h.id === v.holes[v.holeIndex]),
           v,
         );
-        let d = dist(v.pos, next.tee);
-        if (d < 4) {
-          v.pos = { ...next.tee };
+        if (
+          this.navigation.move(
+            v,
+            next.tee,
+            s.facilities.includes("carts") && s.staff.mechanic ? 60 : 32,
+            dt,
+          )
+        ) {
           v.ball = { ...next.tee };
           v.state = "waiting";
           v.timer = 0;
         } else {
-          const step = Math.min(
-            d,
-            dt * (s.facilities.includes("carts") && s.staff.mechanic ? 60 : 32),
-          );
-          v.pos.x += ((next.tee.x - v.pos.x) / d) * step;
-          v.pos.y += ((next.tee.y - v.pos.y) / d) * step;
           v.experiences.walk += dt;
-          v.thought = "Walking to the next tee.";
+          v.thought =
+            v.travelMode === "ferry"
+              ? "Crossing by ferry."
+              : "Following the route to the next tee.";
         }
       }
     }
@@ -428,11 +444,7 @@ export class Simulation {
     }
     const tee = { x: r.tee.x + (v.rangeBay || 0) * 6, y: r.tee.y };
     if (v.state === "goingRange") {
-      const d = dist(v.pos, tee),
-        step = Math.min(d, dt * 32);
-      if (d > 3) {
-        v.pos.x += ((tee.x - v.pos.x) / d) * step;
-        v.pos.y += ((tee.y - v.pos.y) / d) * step;
+      if (!this.navigation.move(v, tee, 32, dt)) {
         v.thought = "Heading to the range before my tee time.";
         return;
       }
@@ -507,6 +519,23 @@ export class Simulation {
   }
   land(v, h) {
     let r = v.shot;
+    this.life.react(v, r);
+    this.effects.push({
+      x: r.land.x,
+      y: r.land.y,
+      kind:
+        r.penalty && /water|Splash/.test(r.quality)
+          ? "water"
+          : r.treeHit
+            ? "leaves"
+            : terrainAt(this.s, r.land) === T.SAND
+              ? "sand"
+              : r.holed
+                ? "spark"
+                : "bounce",
+      age: 0,
+      duration: 1.8,
+    });
     this.s.trails ||= [];
     this.s.trails.push({
       hole: h.id,
@@ -812,13 +841,26 @@ export class Simulation {
           10,
           100,
         ),
-        beauty =
-          v.holes.reduce(
-            (a, id) =>
-              a +
-              (this.analysis(s.holes.find((h) => h.id === id))?.scenery || 35),
-            0,
-          ) / v.holes.length,
+        beauty = Math.min(
+          100,
+          s.decorations.filter(
+            (d) =>
+              d.type !== "stand" &&
+              d.type !== "bridge" &&
+              v.holes.some(
+                (id) => dist(d, s.holes.find((h) => h.id === id).pin) < 180,
+              ),
+          ).length *
+            1.5 +
+            v.holes.reduce(
+              (a, id) =>
+                a +
+                (this.analysis(s.holes.find((h) => h.id === id))?.scenery ||
+                  35),
+              0,
+            ) /
+              v.holes.length,
+        ),
         sat =
           quality * 0.42 +
           value * 0.2 +
@@ -966,7 +1008,10 @@ export class Simulation {
     s.cash -= expenses;
     s.daily.expenses += expenses;
     let area = Math.max(1, s.holes.filter((h) => h.open).length),
-      crew = s.staff.grounds * (s.facilities.includes("maintenance") ? 12 : 7);
+      crew = Math.min(
+        s.staff.grounds * (s.facilities.includes("maintenance") ? 12 : 7),
+        (s.daily.groundWork || 0) * 0.035,
+      );
     s.conditions = clamp(s.conditions + crew - area * 0.6, 10, 100);
     if (s.tournament && s.day >= s.tournament.ends) {
       const result = finishTournament(s);
