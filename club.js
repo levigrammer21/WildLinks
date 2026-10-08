@@ -218,6 +218,22 @@ export function rememberRound(s, v, rec, satisfaction) {
   if (!m) return;
   m.profile = { ...v.golfer, patience: v.basePatience ?? v.golfer.patience };
   m.rounds++;
+  if (!rec.pickup) {
+    for (const key of [
+      "skill",
+      "accuracy",
+      "iron",
+      "wedge",
+      "putting",
+      "recovery",
+      "bunker",
+    ])
+      m.profile[key] = Math.min(
+        Math.max(0.96, m.profile[key]),
+        m.profile[key] + 0.0005 * v.scores.length * (1 - m.profile[key]),
+      );
+    m.profile.drive = Math.min(290, m.profile.drive + 0.025 * v.scores.length);
+  }
   m.satisfaction = satisfaction;
   m.loyalty = clamp(
     (m.loyalty || 0.5) * 0.8 + (satisfaction / 100) * 0.2,

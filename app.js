@@ -1,3 +1,4 @@
+import { DECORATIONS, validateDecoration } from "./life.js";
 import { facilityPosition } from "./facilities.js";
 import { InstallController } from "./pwa.js";
 import { suggestRange, rangeFits } from "./range.js";
@@ -99,6 +100,7 @@ let cloud = new CloudStore({
   lastSave = 0,
   autoFollow = false,
   rangeDraft = null,
+  decorationDraft = null,
   objectDraft = null,
   cloudConnecting = false;
 if (s.activeVisits) {
@@ -166,7 +168,12 @@ function closeSheet() {
 }
 $("closeSheet").onclick = closeSheet;
 $("overlay").onclick = (e) => {
-  if (e.target === $("overlay") && !rangeDraft?.target && !objectDraft?.feature)
+  if (
+    e.target === $("overlay") &&
+    !rangeDraft?.target &&
+    !objectDraft?.feature &&
+    !decorationDraft
+  )
     closeSheet();
 };
 document.addEventListener("keydown", (e) => {
@@ -183,6 +190,7 @@ document.addEventListener("keydown", (e) => {
 });
 function setMode(m) {
   if (tx || pending) return;
+  decorationDraft = null;
   mode = m;
   renderer.mode = m;
   renderer.preview = null;
@@ -246,7 +254,11 @@ $("redo").onclick = () => undoAction(true);
 $("holeSelect").onclick = showHoleList;
 $("openHole").onclick = openHole;
 function renderTools() {
-  const all = [["hand", "✥", "Move", 0], ...TOOLS];
+  const all = [
+    ["hand", "✥", "Move", 0],
+    ...TOOLS,
+    ["decorations", "✿", "Decor", 0],
+  ];
   $("tools").innerHTML = all
     .map(
       ([id, icon, name]) =>
@@ -258,6 +270,8 @@ function renderTools() {
     .forEach(
       (b) =>
         (b.onclick = () => {
+          decorationDraft = null;
+          if (b.dataset.tool === "decorations") return showClub("decor");
           objectDraft = null;
           renderer.editFeature = null;
           rangeDraft = null;
@@ -275,6 +289,7 @@ function newTx() {
     structures: structuredClone({
       range: s.range,
       facilityPositions: s.facilityPositions,
+      decorations: s.decorations,
     }),
     cost: 0,
     tool,
@@ -320,6 +335,7 @@ function commitTx(t) {
     afterStructures: structuredClone({
       range: s.range,
       facilityPositions: s.facilityPositions,
+      decorations: s.decorations,
     }),
     after: structuredClone(s.holes),
     cells: [],
@@ -338,7 +354,8 @@ function commitTx(t) {
   redo = [];
   const h = s.holes[holeIndex],
     oldRev = h.revisionStats?.[h.revision];
-  const courseChange = t.tool !== "object" || t.cells.size > 0;
+  const courseChange =
+    !["object", "decoration"].includes(t.tool) || t.cells.size > 0;
   if (oldRev?.n && courseChange) {
     h.designBaseline = { ...oldRev };
     addJournal(
@@ -363,6 +380,7 @@ function commitTx(t) {
 function finishTx() {
   if (!tx) {
     lastPoint = null;
+    if (decorationDraft?.point) confirmDecoration();
     if (rangeDraft?.target) confirmRangePlacement();
     if (objectDraft?.show) {
       objectDraft.show = false;
@@ -480,6 +498,13 @@ function paint(p) {
   const h = s.holes[holeIndex],
     l = landSize(s);
   if (!ownedAt(s, p)) return;
+  if (tool === "decoration" && decorationDraft) {
+    if (!lastPoint) {
+      lastPoint = p;
+      decorationDraft.point = p;
+    }
+    return;
+  }
   if (tool === "object" && objectDraft) {
     objectTap(p);
     return;
@@ -624,6 +649,8 @@ function openHole() {
   autoFollow = true;
 }
 function objective() {
+  if (decorationDraft)
+    return `<b>Place ${esc(decorationDraft.name)}</b><br>Tap its center. ${money(decorationDraft.cost)} on confirmation. Two fingers move the camera.`;
   if (objectDraft)
     return (
       "<b>Simple shape editor</b><br>" +
@@ -1049,6 +1076,7 @@ const tabs = [
   ["events", "Tournaments"],
   ["facilities", "Facilities"],
   ["staff", "Staff"],
+  ["decor", "Decor & fans"],
   ["records", "Records"],
   ["player", "Your golf"],
   ["reviews", "Feedback"],
@@ -1072,6 +1100,7 @@ function showClub(tab = "overview") {
   if (tab === "events") clubEvents(content);
   if (tab === "facilities") clubFacilities(content);
   if (tab === "staff") clubStaff(content);
+  if (tab === "decor") clubDecor(content);
   if (tab === "records") clubRecords(content);
   if (tab === "player") clubPlayer(content);
   if (tab === "reviews") clubReviews(content);
@@ -1473,6 +1502,7 @@ function clubFacilities(el) {
   );
 }
 function clubStaff(el) {
+  sim.life.sync();
   el.innerHTML =
     `<div class="advice"><b>Suggested staffing</b>${staffAdvice(s)
       .map((a) => `<p>${esc(a)}</p>`)
@@ -1483,6 +1513,15 @@ function clubStaff(el) {
       (f) =>
         `<div class="item"><div><b>${f.name} · ${s.staff[f.id]}</b><p>${staffStatus(s, f.id).status}</p><p class="note">${staffStatus(s, f.id).tip}</p><small>${staffStatus(s, f.id).active ? "Working" : "Inactive"} · ${money(f.wage)} per day each</small></div><button data-fire="${f.id}" ${s.staff[f.id] ? "" : "disabled"} aria-label="Release ${f.name}">−</button><button data-hire="${f.id}" ${s.staff[f.id] >= ({ desk: 3, mechanic: 1, pro: 1, service: 1 }[f.id] || 12) ? "disabled" : ""} aria-label="Hire ${f.name}">+</button></div>`,
     ).join("");
+  el.insertAdjacentHTML(
+    "beforeend",
+    `<h3>Your crew on the course</h3>${s.workers.map((w) => `<div class="item"><div><b>${esc(w.name)}</b><p>${esc(w.task)}</p></div><button data-worker="${w.id}">Find</button></div>`).join("") || "<p>Hire a worker to bring your course to life.</p>"}`,
+  );
+  el.querySelectorAll("[data-worker]").forEach(
+    (b) =>
+      (b.onclick = () =>
+        showWorker(s.workers.find((w) => w.id === b.dataset.worker))),
+  );
   el.querySelectorAll("[data-hire]").forEach(
     (b) =>
       (b.onclick = () => {
@@ -1699,6 +1738,8 @@ function showDaily(d) {
       ["Expenses", money(d.expenses)],
       ["Net", money(d.revenue - d.expenses)],
       ["Rounds completed", d.served],
+      ["Fan admissions", d.fans || 0],
+      ["Gate receipts", money(d.fanRevenue || 0)],
       ["Satisfaction", d.satisfaction === null ? "—" : d.satisfaction + "%"],
       ["Conditions", d.conditions + "%"],
     ]
@@ -1853,7 +1894,7 @@ canvas.addEventListener(
 );
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 function tap(p, screen) {
-  if (dist(p, { x: 38, y: 30 }) < 27) {
+  if (dist(p, facilityPosition(s, "check")) < 27) {
     showClub("overview");
     return;
   }
@@ -1870,6 +1911,16 @@ function tap(p, screen) {
         nearest = v;
       }
     }
+  if (!nearest && mode === "watch") {
+    const worker = s.workers.find(
+      (w) => dist(screen, renderer.screen(w.pos)) < 24,
+    );
+    if (worker) return showWorker(worker);
+    const stand = s.decorations.find(
+      (d) => d.type === "stand" && dist(p, d) < 30,
+    );
+    if (stand) return showClub("decor");
+  }
   if (nearest && mode === "watch") {
     selected = nearest.id;
     updateWatchCard();
@@ -2012,7 +2063,7 @@ function objectSheet() {
     const plan = objectDraft.plan;
     sheet(
       "Confirm course change",
-      `<p>Cost: <b>${money(plan.cost)}</b>. ${f.kind === "terrain" ? "Your shape and its pin move together." : "The facility moves to your chosen location."}</p><div class="row"><button id="confirmFeature" class="primary" ${s.cash < plan.cost ? "disabled" : ""}>Apply · ${money(plan.cost)}</button><button id="cancelFeature">Cancel</button></div>`,
+      `<p>Cost: <b>${money(plan.cost)}</b>. ${f.kind === "terrain" ? "Your shape and its pin move together." : "The object moves to your chosen location."}</p><div class="row"><button id="confirmFeature" class="primary" ${s.cash < plan.cost ? "disabled" : ""}>Apply · ${money(plan.cost)}</button><button id="cancelFeature">Cancel</button></div>`,
     );
     $("confirmFeature").onclick = () => {
       const t = newTx();
@@ -2598,3 +2649,124 @@ addEventListener("online", () => {
 });
 updateCloudBadge(cloud.status);
 if (cloud.session) connectCloud();
+
+function showWorker(w) {
+  if (!w) return;
+  sheet(
+    w.name,
+    `<p><b>${esc(STAFF.find((f) => f.id === w.role)?.name || w.role)}</b></p><p>${esc(w.task)}</p><p>${w.stage === "travel" ? "Heading to the next job" : w.stage === "waiting" ? "Ready when the facility is built" : "On duty"}.</p><button id="findWorker" class="primary">Show on course</button>`,
+  );
+  $("findWorker").onclick = () => {
+    closeSheet();
+    setMode("watch");
+    renderer.follow = null;
+    renderer.camera.x = w.pos.x;
+    renderer.camera.y = w.pos.y;
+    renderer.camera.zoom = 2.2;
+  };
+}
+function clubDecor(el) {
+  el.innerHTML = `<h3>Make the course your own</h3><p>Place, rotate, move, and remove decorations. Footbridges connect walking routes across water.</p>${DECORATIONS.map((f) => `<div class="item"><div><b>${f.name}</b><p>${money(f.cost)} construction · ${money(f.upkeep)} daily care</p></div><button data-decor="${f.id}" ${s.cash < f.cost ? "disabled" : ""}>Place</button></div>`).join("")}<h3>Paying spectators</h3><p>Each stand has 12 seats. Place it within 210 yd of play. Strong golfers, proven returning players and tournament competitors attract fans. Ordinary rounds don’t automatically draw a crowd.</p><p>${s.fans.length} fans on the property · ${s.fanStats.served} admissions · ${money(s.fanStats.revenue)} lifetime gate receipts.</p><label class="field">Admission per fan<input id="fanFee" type="number" inputmode="numeric" min="0" max="50" value="${s.fanFee}"></label><button id="setFanFee">Set admission</button><h3>Placed decorations</h3>${s.decorations.map((d) => `<div class="item"><div><b>${DECORATIONS.find((f) => f.id === d.type).name}</b><p>${d.type === "stand" ? s.fans.filter((f) => f.standId === d.id && f.state !== "leaving").length + "/12 seats occupied" : (d.angle || 0) + "°"}</p></div><button data-dmove="${d.id}">Move</button><button data-drotate="${d.id}">Rotate</button><button data-dremove="${d.id}">Remove</button></div>`).join("") || "<p>No decorations placed yet.</p>"}`;
+  el.querySelectorAll("[data-decor]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        if (tx || pending) return toast("Finish construction first.");
+        closeSheet();
+        setMode("build");
+        tool = "decoration";
+        decorationDraft = {
+          ...DECORATIONS.find((f) => f.id === b.dataset.decor),
+          angle: 0,
+        };
+        renderer.frame();
+        updateUI();
+      }),
+  );
+  $("setFanFee").onclick = () => {
+    s.fanFee = clamp(+$("fanFee").value || 0, 0, 50);
+    save();
+    showClub("decor");
+  };
+  el.querySelectorAll("[data-dmove]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const d = s.decorations.find((d) => d.id === b.dataset.dmove);
+        closeSheet();
+        setMode("build");
+        tool = "object";
+        objectDraft = {
+          stage: "move",
+          feature: { kind: "decoration", id: d.id, center: { x: d.x, y: d.y } },
+        };
+        renderer.editFeature = objectDraft.feature;
+        updateUI();
+      }),
+  );
+  el.querySelectorAll("[data-drotate]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const d = s.decorations.find((d) => d.id === b.dataset.drotate),
+          next = { ...d, angle: ((d.angle || 0) + 45) % 360 };
+        try {
+          validateDecoration(s, next);
+        } catch (e) {
+          return toast(e.message);
+        }
+        const t = newTx();
+        t.tool = "decoration";
+        Object.assign(d, next);
+        commitTx(t);
+        showClub("decor");
+      }),
+  );
+  el.querySelectorAll("[data-dremove]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const t = newTx();
+        t.tool = "decoration";
+        s.decorations = s.decorations.filter((d) => d.id !== b.dataset.dremove);
+        commitTx(t);
+        showClub("decor");
+      }),
+  );
+}
+function confirmDecoration() {
+  const draft = decorationDraft;
+  if (!draft) return;
+  const d = { id: uid(), type: draft.id, ...draft.point, angle: draft.angle };
+  try {
+    validateDecoration(s, d);
+  } catch (e) {
+    draft.point = null;
+    return toast(e.message);
+  }
+  sheet(
+    "Place " + draft.name,
+    `<p>Construction: <b>${money(draft.cost)}</b> · daily care ${money(draft.upkeep)}. ${d.type === "stand" ? "Fans arrive when noteworthy golfers play nearby." : ""}</p><label class="field">Orientation<select id="decorAngle">${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => `<option value="${a}" ${a === d.angle ? "selected" : ""}>${a}°</option>`).join("")}</select></label><div class="row"><button id="placeDecor" class="primary">Place · ${money(draft.cost)}</button><button id="cancelDecor">Cancel</button></div>`,
+  );
+  $("placeDecor").onclick = () => {
+    d.angle = +$("decorAngle").value;
+    try {
+      validateDecoration(s, d);
+    } catch (e) {
+      return toast(e.message);
+    }
+    const t = newTx();
+    t.tool = "decoration";
+    t.cost = draft.cost;
+    s.decorations.push(d);
+    commitTx(t);
+    decorationDraft = null;
+    tool = "hand";
+    closeSheet();
+    renderTools();
+    updateUI();
+  };
+  $("cancelDecor").onclick = () => {
+    decorationDraft = null;
+    tool = "hand";
+    closeSheet();
+    renderTools();
+    updateUI();
+  };
+}

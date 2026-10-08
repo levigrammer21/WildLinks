@@ -1,3 +1,4 @@
+import { validateDecoration } from "./life.js";
 import { facilityBuildings, validateFacilityPosition } from "./facilities.js";
 import { rangeFits } from "./range.js";
 import {
@@ -102,6 +103,9 @@ export function selectFeature(s, p) {
   for (const b of facilityBuildings(s))
     if (dist(p, b) < 22)
       return { kind: "facility", id: b.id, center: { x: b.x, y: b.y } };
+  for (const d of s.decorations || [])
+    if (dist(d, p) < (d.type === "stand" ? 28 : 16))
+      return { kind: "decoration", id: d.id, center: { x: d.x, y: d.y } };
   const terrain = terrainAt(s, p);
   if (![T.GREEN, T.SAND].includes(terrain)) return null;
   const start = index(p.x, p.y),
@@ -147,6 +151,10 @@ export function planTransform(s, f, center, scale = 1) {
       (f.kind === "range" && !ownedAt(s, { x: center.x + 12, y: center.y }))
     )
       throw Error("Keep the complete feature on owned land.");
+    if (f.kind === "decoration") {
+      const d = s.decorations.find((d) => d.id === f.id);
+      validateDecoration(s, { ...d, x: center.x, y: center.y });
+    }
     if (f.kind === "facility") validateFacilityPosition(s, f.id, center);
     if (f.kind === "range" && !rangeFits(s, center, target))
       throw Error("Keep the complete practice corridor on owned land.");
@@ -201,6 +209,10 @@ export function applyTransform(s, f, plan, tx) {
       x: s.range.target.x + delta.x,
       y: s.range.target.y + delta.y,
     };
+  } else if (f.kind === "decoration") {
+    const d = s.decorations.find((d) => d.id === f.id);
+    d.x = plan.center.x;
+    d.y = plan.center.y;
   } else if (f.kind === "facility") {
     s.facilityPositions[f.id] = { ...plan.center };
   } else {

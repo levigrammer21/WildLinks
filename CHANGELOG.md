@@ -1,3 +1,11 @@
+# Wild Links 1.3.0
+
+- Named workers appear on the property: groundskeepers ride mowers on fairways, tend greens and rake bunkers; professionals work beside the range; check-in, cart and café employees work at their facilities. Staff cards show current tasks and Find centers the camera on a worker. Groundskeepers must reach and perform their work to restore conditions.
+- Golfers and staff use terrain-aware walking routes, prefer paths, avoid ponds, and cross placed footbridges. Disconnected island greens retain a visible ferry crossing. Walking golfers carry bags, animate their steps and react to actual shot outcomes; landings show sand, leaves, splashes or celebratory particles.
+- Build eight procedural decorations in Build → Decor or Clubhouse → Decor & fans: benches, flowers, rocks, fountains, signs, arches, footbridges and viewing stands. Placement is quoted; move, rotate, remove, Undo/Redo and saves are supported. Nearby landscaping contributes modestly to beauty feedback.
+- Viewing stands seat twelve fans. Tournament competitors, strong golfers and established returning players with a recorded under-par best attract spectators nearby. Fans pay a configurable admission, walk to seats, cheer good shots and leave after play. Gate receipts are tracked separately in daily reports; higher admission reduces demand. Total live spectators are capped at 48 for mobile performance.
+- Returning golfers improve gradually through completed rounds. Owner improvement remains tied to personally playing completed holes. Existing properties migrate without resetting progress.
+
 # Wild Links 1.2.2
 
 - Add an install screen with native prompt support, Android/iPad fallback instructions and installed-app recognition. Supply 180/192/512 PNG icons, a maskable icon, manifest identity, Apple web-app metadata and complete offline caching.
